@@ -6,6 +6,12 @@
 
 ### 修复
 
+- **默认主题改为 gruvbox**：`data-theme` 默认值 catppuccin → gruvbox（无 localStorage 记忆时生效；已记忆的主题保持用户选择；srcdoc 内联色值随之）
+
+
+
+### 修复
+
 - **iframe 高度同步根本解决**：折叠块展开后代码框超出底部不可见（事件驱动 syncH 有遗漏）→ srcdoc 改用 **MutationObserver 监听内容变化**（折叠/公式 SVG/代码高亮/图片 load/字体就绪一律自动防抖同步高度）——不再依赖逐个事件
 
 
