@@ -6,6 +6,9 @@
 
 ### 修复
 
+- **滚动条主题化**：filter 标签区/代码框/页面滚动条统一 WebKit 样式（surface2 thumb + 透明 track），Firefox 用原生 `scrollbar-color`；修复 Chrome 中 thumb `border` 渲染成一圈黑色轮廓（去 border）
+- **数字输入框去增减按钮**：filter 栏 Rating/解题数输入框的 spin button 隐藏（WebKit `appearance:none` + Firefox `appearance:textfield`）
+- **返回按钮箭头居中**：Chrome 中 `←` 字体字形基线偏移（Firefox 正常）→ 改用 **SVG 箭头**（几何渲染零字体依赖）+ i18n 文本去箭头（避免双箭头）
 - **iframe 高度动态同步**：浏览器 resize（宽屏→窄屏）时图片等比缩放、内容重排——srcdoc 补 `window resize` 监听自动防抖同步高度（此前高度停留在旧值，题面图片下文字与本地解题代码错位/被覆盖）
 - **默认主题改为 gruvbox**：`data-theme` 默认值 catppuccin → gruvbox（无 localStorage 记忆时生效；已记忆的主题保持用户选择；srcdoc 内联色值随之）
 

@@ -94,6 +94,27 @@
         margin: 0;
         padding: 0;
       }
+      /* ═══ 滚动条主题化（Chrome/Edge 等 WebKit——filter 标签区/代码框/页面统一）═══ */
+      ::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--surface2);
+        border-radius: 5px;
+        /* 无 border：Chrome 中 border 渲染成一圈黑色轮廓（Firefox 不应用 webkit 伪元素所以正常） */
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--border);
+      }
+      /* Firefox 滚动条主题化（原生属性，不产生黑圈） */
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--surface2) transparent;
+      }
       body {
         background: var(--bg);
         color: var(--text);
@@ -203,6 +224,16 @@
       }
       .filters > div {
         min-height: 58px; /* 冗余高度：中英切换不影响整体高度 */
+      }
+      /* 数字输入框去掉上下增减按钮（Chrome/Edge spin button + Firefox 原生） */
+      input[type="number"]::-webkit-inner-spin-button,
+      input[type="number"]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type="number"] {
+        -moz-appearance: textfield;
+        appearance: textfield;
       }
       .filters input,
       .filters select {
@@ -455,6 +486,14 @@
         width: 116px; /* 固定宽度：← Back / ← 返回 切换不影响后续元素位置 */
         text-align: center;
       }
+      /* SVG 箭头：几何渲染，不依赖字体字形（Chrome 的 ← 字形基线偏移问题） */
+      .back-arrow {
+        width: 12px;
+        height: 12px;
+        vertical-align: -1px;
+        margin-right: 5px;
+        display: inline-block;
+      }
       .back-btn:hover {
         border-color: var(--accent);
       }
@@ -669,7 +708,9 @@
     <!-- ═══ 详情视图 ═══ -->
     <div id="detail-view">
       <div class="detail-bar">
-        <button class="back-btn" onclick="goBack()" data-i18n="back">← Back</button>
+        <button class="back-btn" onclick="goBack()">
+          <svg class="back-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span data-i18n="back">Back</span>
+        </button>
         <div class="detail-title" id="detail-title"></div>
         <div class="detail-meta" id="detail-meta"></div>
         <div class="tabs">
@@ -725,7 +766,7 @@
           colSolved: "Solved",
           colTags: "Tags",
           colLink: "Link",
-          back: "← Back",
+          back: "Back",
           tabStatement: "📄 Statement",
           tabEditorial: "📖 Editorial",
           totalLine: "Total: {n} problems (rated: {r}, 800-3500)",
@@ -780,7 +821,7 @@
           colSolved: "解题数",
           colTags: "标签",
           colLink: "链接",
-          back: "← 返回",
+          back: "返回",
           tabStatement: "📄 题面",
           tabEditorial: "📖 题解",
           totalLine: "共 {n} 题（有分数标注: {r} 题，范围 800-3500）",
