@@ -1082,18 +1082,25 @@
       const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
       const sansStack = '"Noto Sans SC", "PingFang SC", sans-serif';
 
-      /* 保护公式内反斜杠：marked 会把 \\ 转义成 \（破坏 LaTeX 多行换行等），
-         公式段内 \ → &#92; 实体绕过 marked，MathJax 收到原始反斜杠 */
-      function protectMathBackslashes(md) {
+      /* 保护公式内 markdown 敏感字符：marked 会把 \\ 转义、* 当强调、[] 当链接、
+         _ 当下划线（全部破坏 LaTeX）→ 公式段内统一转 HTML 实体绕过 marked，
+         MathJax 收到原始 LaTeX */
+      function protectMathContent(md) {
         return md.replace(/(\$\$?[^$]*?\$\$?)/g, function (m) {
-          return m.replace(/\\/g, "&#92;");
+          return m
+            .replace(/\\/g, "&#92;")
+            .replace(/\*/g, "&#42;")
+            .replace(/_/g, "&#95;")
+            .replace(/\[/g, "&#91;")
+            .replace(/\]/g, "&#93;")
+            .replace(/\`/g, "&#96;");
         });
       }
 
       function mdFrame(md) {
         let html;
         try {
-          html = window.marked ? marked.parse(protectMathBackslashes(md)) : null;
+          html = window.marked ? marked.parse(protectMathContent(md)) : null;
         } catch (e) {
           html = null;
         }
