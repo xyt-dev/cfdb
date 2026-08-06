@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 性能
+
+- **editorial 探测并发化**：未确认的比赛按批并发探测（BATCH 8 + 批间限速 1.5s），已爬/已确认无题解的比赛秒跳过；整批网络异常自动暂停（403 自适应），下次启动续跑——首轮 2000 场从串行 ~50 分钟提速数倍，且记忆持续积累、中断不丢
+
+### 修复
+
+- **failed_editorials 并发写安全**：记忆写入加线程锁（HTTP 线程与后台探测并发写不再互相覆盖丢条目）
+
+
+
 ### 修复
 
 - **editorial 批量爬取 int contestId 崩溃**：`fetch_all_editorials` 遍历 problems.json 传 int，动态 tutorial 补全的 `len(cid)` 抛 TypeError（批量爬到 655 场卡死）→ `fetch_editorial_md` 统一 `str(cid)`

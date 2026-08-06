@@ -57,7 +57,7 @@ def auto_update():
 
         crawl_state["stage"] = "editorials"
         print("[auto-update] 增量爬取缺失题解...")
-        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=1.0, on_progress=_on_progress)
+        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=1.5, on_progress=_on_progress)
         print(f"[auto-update] ✅ 题解: 共 {total} 场比赛 | 已有 {cached} | 新爬 {fetched}")
 
         crawl_state["stage"] = "done"

@@ -277,6 +277,8 @@ def editorial_path(cid) -> str:
 
 
 FAILED_EDITORIALS = os.path.join(ROOT, "failed_editorials.json")
+import threading as _threading
+_failed_lock = _threading.Lock()
 
 
 def _load_failed_editorials() -> set:
@@ -289,13 +291,14 @@ def _load_failed_editorials() -> set:
 
 
 def _remember_failed_editorial(cid):
-    s = _load_failed_editorials()
-    s.add(str(cid))
-    try:
-        with open(FAILED_EDITORIALS, "w", encoding="utf-8") as f:
-            json.dump(sorted(s), f, ensure_ascii=False, indent=1)
-    except OSError:
-        pass
+    with _failed_lock:  # 并发写保护（HTTP 线程可能同时调用）
+        s = _load_failed_editorials()
+        s.add(str(cid))
+        try:
+            with open(FAILED_EDITORIALS, "w", encoding="utf-8") as f:
+                json.dump(sorted(s), f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
 
 
 def read_editorial_md(cid) -> str | None:
@@ -496,41 +499,65 @@ def fetch_all_statements(delay: float = 0.4, dry: bool = False,
     return total, cached, fetched
 
 
-def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
+def fetch_all_editorials(delay: float = 1.5, dry: bool = False,
                           on_progress=None) -> tuple[int, int, int]:
     """遍历所有比赛预爬题解。返回 (比赛数, 命中缓存, 新爬)
-    无公开 Editorial 的比赛快速跳过（不算失败，计 skipped）"""
+    已爬/已确认无题解的比赛秒跳过；未确认的按批并发探测（默认 4 并发，
+    批间 delay 限速防封禁；批量内出现网络异常则暂停，下次启动续跑）"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     problems = _load_problems()
     contests = sorted({p["contestId"] for p in problems})
     total = len(contests)
     cached = 0
     fetched = 0
-    skipped = 0
     failed = 0
     failed_set = _load_failed_editorials()
-    for i, cid in enumerate(contests, 1):
+    todo = []
+    for cid in contests:
         if os.path.isfile(editorial_path(cid)) or str(cid) in failed_set:
-            # 已爬 或 已知失败（无 editorial/网络失败）：秒跳过（与题面同模式）
-            cached += 1
-            if on_progress:
-                on_progress(i, total, cached, fetched, failed)
-            continue
-        if not dry:
-            md = fetch_editorial_md(cid, retries=1, timeout=15)
+            cached += 1  # 已爬 或 已确认无：秒跳过
+        else:
+            todo.append(cid)
+    if on_progress:
+        on_progress(cached, total, cached, fetched, failed)
+    BATCH = 8
+    done = cached
+    idx = 0
+    while idx < len(todo):
+        batch = todo[idx:idx + BATCH]
+        idx += BATCH
+        # 批内并发探测
+        results = {}
+        with ThreadPoolExecutor(max_workers=BATCH) as ex:
+            futs = {ex.submit(fetch_editorial_md, c, 1, 12): c for c in batch}
+            for f in as_completed(futs):
+                c = futs[f]
+                try:
+                    results[c] = f.result()
+                except Exception:
+                    results[c] = None
+        blocked = 0
+        for c in batch:
+            done += 1
+            md = results.get(c)
             if md:
                 fetched += 1
             else:
                 failed += 1
-                if f"{cid}@temp" in failed_set:
-                    pass  # 网络失败/被拦：不记 cid（下次启动重试）
-                elif f"{cid}@announcement" not in failed_set:
-                    failed_set.add(str(cid))
-                    _remember_failed_editorial(cid)  # 确认无题解：记忆，避免反复重试
-            time.sleep(delay)  # 仅对真实爬取限速
+                if f"{c}@temp" in failed_set:
+                    blocked += 1  # 网络失败/被拦：不记 cid（下次重试）
+                elif f"{c}@announcement" not in failed_set:
+                    failed_set.add(str(c))
+                    _remember_failed_editorial(c)  # 确认无题解：记忆
         if on_progress:
-            on_progress(i, total, cached, fetched, failed)
-        if (i % 20 == 0 or i == total) and not on_progress:
-            print(f"  题解 [{i}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed}")
+            on_progress(done, total, cached, fetched, failed)
+        elif idx % 100 == 0 or idx >= len(todo):
+            print(f"  题解 [{done}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed}")
+        # 403 自适应：整批网络异常 → 暂停（避免无谓请求与封禁升级）
+        if blocked == len(batch) and len(batch) == BATCH:
+            print("  ⚠️ 网络异常（CF 可能限流/封禁）——暂停探测，下次启动续跑")
+            break
+        time.sleep(delay)  # 批间限速（4 并发 × 批间 = ~2.7 req/s）
     return total, cached, fetched
 
 
