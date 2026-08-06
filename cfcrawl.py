@@ -253,10 +253,17 @@ def read_solution(name) -> str | None:
 
 # ═══ CF 官方题解（editorial 博客）═══
 def _find_editorial_link(contest_html: str) -> str | None:
-    """在比赛页面找 editorial 博客链接（按 title 属性匹配，避免误抓 Announcement）"""
+    """在比赛页面找 editorial 博客链接。
+    ① title 属性匹配（常规页面）；② 链接文本匹配（老页面 title 是数字，文本才是 Tutorial）"""
     for m in re.finditer(r'<a[^>]*href="(/blog/entry/\d+)"[^>]*title="([^"]*)"[^>]*>',
                          contest_html, re.I):
         if re.search(r"editorial|tutorial", m.group(2), re.I):
+            return "https://codeforces.com" + m.group(1)
+    # fallback：链接文本含 Tutorial/Editorial（排除 Announcement）
+    for m in re.finditer(r'<a[^>]*href="(/blog/entry/\d+)"[^>]*>([\s\S]*?)</a>',
+                         contest_html, re.I):
+        text = m.group(2)
+        if re.search(r"tutorial|editorial", text, re.I) and not re.search(r"announcement", text, re.I):
             return "https://codeforces.com" + m.group(1)
     return None
 
@@ -389,10 +396,12 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     contest_url = f"https://codeforces.com/contest/{cid}"
     contest_html = fetch_url(contest_url, timeout=timeout, retries=retries)
     if not contest_html:
+        _remember_failed_editorial(f"{cid}@temp")  # 网络失败：临时标记，不误记为无题解
         return None
     # 404/不存在的比赛页检测（避免把错误页当正常处理）
     if ("Contest not found" in contest_html or "does not exist" in contest_html
             or "Just a moment" in contest_html):
+        _remember_failed_editorial(f"{cid}@temp")
         return None
     link = _find_editorial_link(contest_html)
     if not link:
@@ -511,10 +520,11 @@ def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
                 fetched += 1
             else:
                 failed += 1
-                if f"{cid}@announcement" not in failed_set:
-                    # 临时失败（公告/网络）不记 cid？——公告要重试；真失败才记
+                if f"{cid}@temp" in failed_set:
+                    pass  # 网络失败/被拦：不记 cid（下次启动重试）
+                elif f"{cid}@announcement" not in failed_set:
                     failed_set.add(str(cid))
-                    _remember_failed_editorial(cid)  # 记忆失败，避免反复重试
+                    _remember_failed_editorial(cid)  # 确认无题解：记忆，避免反复重试
             time.sleep(delay)  # 仅对真实爬取限速
         if on_progress:
             on_progress(i, total, cached, fetched, failed)
