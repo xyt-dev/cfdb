@@ -320,7 +320,7 @@ def editorial_to_md(html_text: str) -> str:
     CF 博客中每个评论也是独立 ttypography 容器，且页面 div 常未闭合
     导致 _extract_div 提取过头 —— 用正则截到下一个 ttypography 前"""
     m = re.search(
-        r'<div class="ttypography">(.*?)(?=<div class="ttypography"|<script|$)',
+        r'<div class="ttypography">(.*?)(?=<div class="ttypography"|$)',
         html_text, re.S)
     src = m.group(1) if m else _extract_div(html_text, "ttypography")
     if not src.strip():
