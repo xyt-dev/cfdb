@@ -11,3 +11,4 @@ __pycache__/
 
 # 本地临时
 *.log
+failed_editorials.json
