@@ -160,6 +160,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 md = cfcrawl.read_editorial_md(cid) or cfcrawl.fetch_editorial_md(cid)
                 url = cfcrawl.read_editorial_url(cid)
+                if md and md.startswith("<!-- url:"):
+                    # 剥离首行注释（纯 md 返回给前端）
+                    idx = md.find("\n")
+                    md = md[idx + 1:] if idx >= 0 else ""
                 self._send(200, json.dumps({"md": md, "url": url}).encode(), "application/json")
         elif u.path == "/api/solution":
             q = urllib.parse.parse_qs(u.query)

@@ -214,12 +214,15 @@ def read_editorial_md(cid) -> str | None:
 
 
 def read_editorial_url(cid) -> str | None:
-    """读取 editorial 原链接（.url 文件）"""
+    """从 md 首行注释读取 editorial 原链接（自包含方案）"""
     try:
-        with open(editorial_path(cid) + ".url", encoding="utf-8") as f:
-            return f.read().strip() or None
+        with open(editorial_path(cid), encoding="utf-8") as f:
+            first = f.readline()
+        if first.startswith("<!-- url: "):
+            return first[len("<!-- url: "):-len(" -->")].strip() or None
     except OSError:
-        return None
+        pass
+    return None
 
 
 def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
@@ -238,21 +241,15 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     blog_html = fetch_url(link)
     if not blog_html:
         return None
-    # 保存 editorial 原链接（题解 tab 的"打开"按钮用）
-    try:
-        os.makedirs(EDITORIAL_DIR, exist_ok=True)
-        with open(editorial_path(cid) + ".url", "w", encoding="utf-8") as f:
-            f.write(link)
-    except OSError:
-        pass
     md = html2md.editorial_to_md(blog_html)
     if not md.strip():
         return None
     md = _embed_images(md, f"{cid}", EDITORIAL_IMAGE_DIR, "eimages")  # 下载题解图片
     try:
         os.makedirs(EDITORIAL_DIR, exist_ok=True)
+        # 原链接内嵌 md 首行注释（自包含，无需单独 .url 文件）
         with open(editorial_path(cid), "w", encoding="utf-8") as f:
-            f.write(md)
+            f.write(f"<!-- url: {link} -->\n{md}")
     except OSError:
         pass
     return md

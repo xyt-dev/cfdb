@@ -1106,12 +1106,20 @@
         }
         if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
         html = html.replace(/<\/script/gi, "&lt;/script");
-        // 标题（首个 h1）右侧加"打开"链接（题面=原题，题解=editorial 博客）
+        // 标题右侧加"打开"链接（题面=原题，题解=editorial 博客）
         url = url || (currentProblem ? currentProblem.url : "");
-        html = html.replace(
-          /<h1>([\s\S]*?)<\/h1>/,
-          `<h1>$1 <a class="open" href="${url}" target="_blank">打开 ↗</a></h1>`,
-        );
+        if (/<h1>/i.test(html)) {
+          html = html.replace(
+            /<h1>([\s\S]*?)<\/h1>/,
+            `<h1>$1 <a class="open" href="${url}" target="_blank">打开 ↗</a></h1>`,
+          );
+        } else {
+          // 无 h1（如粗体标题的题解）：顶部右对齐插入链接行
+          html =
+            `<div style="text-align:right;margin-bottom:10px">` +
+            `<a class="open" href="${url}" target="_blank">打开 ↗</a></div>` +
+            html;
+        }
         const c = themeColors();
         const frame = el("iframe", "statement-frame");
         frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
