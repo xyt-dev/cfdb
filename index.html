@@ -1082,25 +1082,22 @@
       const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
       const sansStack = '"Noto Sans SC", "PingFang SC", sans-serif';
 
-      /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h3），
-         统一渲染为 h2 + 前后分割线；首个题目标题右侧插"打开"链接；
-         无题号标题时顶部右对齐插入链接行 */
-      function normalizeProblemHeaders(html, url) {
-        let first = true;
+      /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h4），
+         统一渲染为 h2 + 前后分割线；标题本身链接到原题（titleLink 回调） */
+      function normalizeProblemHeaders(html, url, titleLink) {
         const wrap = (text) => {
-          const link =
-            first && url
-              ? ` <a class="open" href="${url}" target="_blank">打开 ↗</a>`
-              : "";
-          first = false;
-          return `<hr><h2>${text}${link}</h2><hr>`;
+          const href = titleLink ? titleLink(text.trim()) : null;
+          const inner = href
+            ? `<a class="ptitle" href="${href}" target="_blank" title="在 Codeforces 打开原题">${text}</a>`
+            : text;
+          return `<hr><h2>${inner}</h2><hr>`;
         };
         const isProblemTitle = (t) => {
           const s = t.trim();
           // 格式1：题号 + 连字符（1900A - xxx / A1 - xxx / 2000A — xxx）
           if (/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S/.test(s)) return true;
-          // 格式2：字母+数字 空格+题名（D2A Submission / D1B Stay）
-          if (/^[A-Z]\d[A-Z]?\s+\S/.test(s)) return true;
+          // 格式2：字母+数字+字母 空格+题名（D2A Submission / D1B Stay / D1C1 Interactive）
+          if (/^[A-Z]\d[A-Z]?\d?\s+\S/.test(s)) return true;
           return false;
         };
         // 顺序：先 h1-h3（wrap 生成的 h2 不会被后续正则二次匹配）
@@ -1118,13 +1115,6 @@
           /<p><strong>([\s\S]*?)<\/strong><\/p>/g,
           (m, t) => (isProblemTitle(t) ? wrap(t) : m),
         );
-        // 4. 兜底：无任何题号标题时，顶部右对齐链接行
-        if (first && url) {
-          html =
-            `<div style="text-align:right;margin-bottom:10px">` +
-            `<a class="open" href="${url}" target="_blank">打开 ↗</a></div>` +
-            html;
-        }
         return html;
       }
 
@@ -1143,6 +1133,45 @@
         });
       }
 
+      /* 题目标题 → Codeforces 原题链接：
+         ① ALL 按名称匹配（优先带 contestId 约束，处理 D2A/无数字题号）
+         ② 数字解析（1900A → contest/1900/problem/A）
+         ③ 当前题目 contestId 兜底（A1 → contest/当前/contest/problem/A1） */
+      function problemHref(titleText) {
+        try {
+          const t = titleText.replace(/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]?\s*/, "").trim();
+          if (!t) return null;
+          const num = (titleText.match(/(\d{3,4})/) || [])[1];
+          if (ALL.length) {
+            const m =
+              (num
+                ? ALL.find((x) => x.name === t && x.contestId === +num)
+                : null) || ALL.find((x) => x.name === t);
+            if (m) {
+              return (
+                "https://codeforces.com/contest/" +
+                m.contestId +
+                "/problem/" +
+                m.index
+              );
+            }
+          }
+          const idx0 = (titleText.match(/^(?:[A-Z]?\d{1,4}|D[12])([A-Z]\d*)/) || [])[1];
+          if (num && idx0) {
+            return "https://codeforces.com/contest/" + num + "/problem/" + idx0;
+          }
+          if (currentProblem && idx0) {
+            return (
+              "https://codeforces.com/contest/" +
+              currentProblem.contestId +
+              "/problem/" +
+              idx0
+            );
+          }
+        } catch (e) {}
+        return null;
+      }
+
       function mdFrame(md, url) {
         let html;
         try {
@@ -1152,9 +1181,9 @@
         }
         if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
         html = html.replace(/<\/script/gi, "&lt;/script");
-        // 题目标题规范化 + "打开"链接（题面=原题，题解=editorial 博客）
+        // 题目标题规范化 + 标题链接到原题（题面=原题，题解=editorial 博客右上角打开）
         url = url || (currentProblem ? currentProblem.url : "");
-        html = normalizeProblemHeaders(html, url);
+        html = normalizeProblemHeaders(html, url, problemHref);
         const c = themeColors();
         const frame = el("iframe", "statement-frame");
         frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -1169,9 +1198,15 @@ pre { background:${c.surface}; border:1px solid ${c.border}; border-radius:8px;
 code { background:${c.surface}; padding:1px 6px; border-radius:4px; font-size:13.5px; }
 pre code { background:none; padding:0; }
 h1 { font-size:21px; margin:6px 0 14px; font-family:${sansStack}; }
-.open { font-size:13px; font-weight:400; color:${c.accent}; text-decoration:none;
-  margin-left:12px; font-family:${sansStack}; vertical-align:middle; }
-.open:hover { text-decoration:underline; }
+/* 右上角「打开 ↗」（fixed 相对 iframe 视口） */
+.toplink { position:fixed; top:10px; right:16px; z-index:50;
+  font:13px ${sansStack}; color:${c.accent}; text-decoration:none;
+  background:${c.surface}; border:1px solid ${c.border};
+  padding:4px 12px; border-radius:8px; }
+.toplink:hover { border-color:${c.accent}; }
+/* 题号标题链接到原题 */
+a.ptitle { color:${c.accent}; text-decoration:none; }
+a.ptitle:hover { text-decoration:underline; }
 h2 { font-size:17px; color:${c.accent}; margin:22px 0 8px; font-family:${sansStack}; }
 h3 { font-size:15.5px; margin:18px 0 6px; }
 a { color:${c.accent}; }
@@ -1195,7 +1230,7 @@ blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px;
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]},startup:{typeset:false}};<\/script>
 <script src="/vendor/tex-svg-full.js"><\/script>
-</head><body><div id="md">${html}</div>
+</head><body>${url ? `<a class="toplink" href="${url}" target="_blank">打开 ↗</a>` : ""}<div id="md">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
 /* 代码块语法高亮：仅带语言标注的高亮；裸代码块（样例等）保持纯文本 */
