@@ -385,6 +385,7 @@ def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
 
 def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     """爬取比赛题解转 md 并缓存（contest 页找 editorial 链接 → 爬博客）"""
+    cid = str(cid)  # 统一字符串（批量遍历来自 problems.json 的 int）
     contest_url = f"https://codeforces.com/contest/{cid}"
     contest_html = fetch_url(contest_url, timeout=timeout, retries=retries)
     if not contest_html:
