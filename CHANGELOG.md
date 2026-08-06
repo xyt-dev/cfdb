@@ -2,10 +2,11 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
-## [Unreleased]
+## [v2.2.0] - 2026-08-06
 
 ### 新增
 
+- **双语 README**：英文默认（`README.md`）+ 中文（`README.zh-CN.md`），顶部语言互链；覆盖功能/快速开始/手动爬取/数据布局/说明
 - **强制使用 CodeNewRoman Nerd Font**：本地 otf（vendor/，零 CDN）——正文比例版 + 代码等宽 Mono 版（Regular/Bold/Italic 6 个 @font-face）；主页面、srcdoc 阅读区、solutions 代码块全覆盖；`/vendor/` 路由补 font/otf content-type
 - **i18n 全页面中英切换**：默认英文；「文/En」按钮位于主题按钮左侧（localStorage 记忆）；覆盖静态文本（筛选标签/排序/表头/tab/按钮）、动态文本（进度条/筛选统计/hint/详情元数据）与 srcdoc 内容（打开 ↗/图片占位）；详情页内切换即时重建当前 tab
 - **恢复默认按钮**：从迷你图标 `↺` 改为文字「Default/默认」（随语言切换）
