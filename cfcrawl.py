@@ -194,8 +194,8 @@ def _fetch_statement_pdf(cid: str, idx: str, url: str, timeout: int = 30) -> str
 
 def fetch_statement_md(cid, idx, retries: int = 3, timeout: int = 30) -> str | None:
     """爬取题面转 md 并缓存 —— 仅 update.py 预爬使用"""
-    if not (str(cid).isdigit() and str(idx) and str(idx)[0].isalpha() and str(idx).isalnum()):
-        return None  # 非法参数直接失败，不触发网络请求（index 可含数字：A1/B2/F1）
+    if not (str(cid).isdigit() and str(idx) and str(idx).isalnum() and len(str(idx)) <= 3):
+        return None  # 非法参数直接失败，不触发网络请求（index：A / A1 / 01 均可）
     url = f"https://codeforces.com/contest/{cid}/problem/{idx}"
     # 先探测 content-type：PDF 题面（CF 对无 HTML 题面的比赛只提供 PDF）
     ct = _probe_content_type(url, timeout=timeout)
