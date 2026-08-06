@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CF Database — Codeforces Problem Library</title>
+    <link rel="icon" type="image/png" href="/vendor/cf-favicon.png" />
+    <title>Codeforces Database — Codeforces Problem Library</title>
     <script src="/vendor/marked.min.js"></script>
     <script src="/vendor/highlight.min.js"></script>
     <style>
@@ -134,6 +135,12 @@
       }
       h1 .accent {
         color: var(--accent);
+      }
+      .title-icon {
+        width: 22px;
+        height: 22px;
+        vertical-align: -4px;
+        margin-right: 6px;
       }
       .sub {
         color: var(--subtext);
@@ -617,7 +624,7 @@
     <div class="container" id="list-view">
       <div class="topbar">
         <div>
-          <h1>CF <span class="accent">Database</span></h1>
+          <h1><img class="title-icon" src="/vendor/cf-favicon.png" alt="CF" />CF <span class="accent">Database</span></h1>
           <div class="sub" id="total-line">Loading...</div>
         </div>
         <div class="topbar-btns">
@@ -741,7 +748,7 @@
       } catch (e) {}
       const I18N = {
         en: {
-          title: "CF Database — Codeforces Problem Library",
+          title: "Codeforces Database — Codeforces Problem Library",
           loading: "Loading...",
           theme: "🎨 Theme",
           preCrawling: "Pre-crawling...",
@@ -796,7 +803,7 @@
           langName: { rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C", py: "Python", java: "Java", go: "Go", ts: "TypeScript", js: "JavaScript", kt: "Kotlin" },
         },
         zh: {
-          title: "CF Database — Codeforces 题目库",
+          title: "Codeforces Database — Codeforces 题目库",
           loading: "加载中...",
           theme: "🎨 主题",
           preCrawling: "预爬中...",

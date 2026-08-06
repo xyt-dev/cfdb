@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **favicon 与标题 CF 图标**：标签页 favicon 使用本地 CF 图标（`vendor/cf-favicon.png`，零 CDN）；页面顶部标题（h1）前加 CF 图标 22×22
+- **`/vendor/` 图片 content-type**：png/jpg/gif/svg/webp 正确返回（此前 octet-stream 导致 favicon 不显示）
+
+## [v2.4.0] - 2026-08-06
+
 ### 修复
 
 - **空壳阈值修正（200→50）**：短题面（愚人节题等 51-200B 正常内容）被误判为空壳 → 阈值与写前保护一致（≤50B 才算爬取异常产物）；1331A 等 6 个短题面恢复显示

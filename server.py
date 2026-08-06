@@ -132,6 +132,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         ctype = "application/javascript"
                     elif name.endswith((".otf", ".ttf")):
                         ctype = "font/otf" if name.endswith(".otf") else "font/ttf"
+                    elif name.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")):
+                        ctype = {
+                            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                            ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+                        }[os.path.splitext(name)[1].lower()]
                     else:
                         ctype = "application/octet-stream"
                     self._send(200, f.read(), ctype)
