@@ -395,12 +395,10 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
         return None
     link = _find_editorial_link(contest_html)
     if not link:
-        # 该比赛确实无公开 Editorial（稳定事实）→ 记忆跳过
-        _remember_failed_editorial(cid)
         return None
     blog_html = fetch_url(link)
     if not blog_html:
-        return None  # 有链接但网络失败：不记忆（暂时问题，下次重试）
+        return None
     # 收集动态加载的 per-problem tutorial 占位
     codes = []
     if '<div class="problemTutorial"' in blog_html:
@@ -496,13 +494,9 @@ def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
     failed = 0
     failed_set = _load_failed_editorials()
     for i, cid in enumerate(contests, 1):
-        if os.path.isfile(editorial_path(cid)):
+        if os.path.isfile(editorial_path(cid)) or str(cid) in failed_set:
+            # 已爬 或 已知失败（无 editorial/网络失败）：秒跳过（与题面同模式）
             cached += 1
-            if on_progress:
-                on_progress(i, total, cached, fetched, failed)
-            continue
-        if str(cid) in failed_set:
-            skipped += 1  # 已记忆：该比赛无 editorial（秒跳过，不再请求）
             if on_progress:
                 on_progress(i, total, cached, fetched, failed)
             continue
@@ -510,13 +504,15 @@ def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
             md = fetch_editorial_md(cid, retries=1, timeout=15)
             if md:
                 fetched += 1
-            elif not os.path.isfile(editorial_path(cid)):
-                failed += 1  # 无链接已记忆；有链接失败的不记（下次重试）
-            time.sleep(delay)
+            else:
+                failed += 1
+                failed_set.add(str(cid))
+                _remember_failed_editorial(cid)  # 记忆失败，避免反复重试
+            time.sleep(delay)  # 仅对真实爬取限速
         if on_progress:
             on_progress(i, total, cached, fetched, failed)
         if (i % 20 == 0 or i == total) and not on_progress:
-            print(f"  题解 [{i}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed} 跳过 {skipped}")
+            print(f"  题解 [{i}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed}")
     return total, cached, fetched
 
 
