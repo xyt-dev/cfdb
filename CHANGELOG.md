@@ -20,6 +20,7 @@
 
 ### 修复
 
+- **快速切换 题面⇄题解 竞态**：editorial/题面/解题代码的异步响应迟到时会无条件 `replaceChildren()` 覆盖当前视图（题面消失、显示"没有 Editorial"）→ 加载请求序列号（`loadSeq`），切 tab/切题/返回列表后旧响应直接丢弃
 - **图片路由恢复**：移除 shiki 时误删 `/images/` `/eimages/` 路由 → 已恢复（content-type 按扩展名）
 - **题解代码高亮**：md 代码块语言标注（html2md 启发式检测：`#include`/`cin`/`cout`→cpp、`def`/`print(`→python、`fn`+`let`→rust 等；含弱特征：`long long`/`for (int`/`1ll`/C 风格 `){`）
 - **围栏配对错乱**：正则无法区分开/闭围栏 → 改为逐行状态机识别，已爬 md 批量补救（含前导空格围栏）
