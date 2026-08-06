@@ -1082,6 +1082,52 @@
       const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
       const sansStack = '"Noto Sans SC", "PingFang SC", sans-serif';
 
+      /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h3），
+         统一渲染为 h2 + 前后分割线；首个题目标题右侧插"打开"链接；
+         无题号标题时顶部右对齐插入链接行 */
+      function normalizeProblemHeaders(html, url) {
+        let first = true;
+        const wrap = (text) => {
+          const link =
+            first && url
+              ? ` <a class="open" href="${url}" target="_blank">打开 ↗</a>`
+              : "";
+          first = false;
+          return `<hr><h2>${text}${link}</h2><hr>`;
+        };
+        const isProblemTitle = (t) => {
+          const s = t.trim();
+          // 格式1：题号 + 连字符（1900A - xxx / A1 - xxx / 2000A — xxx）
+          if (/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S/.test(s)) return true;
+          // 格式2：字母+数字 空格+题名（D2A Submission / D1B Stay）
+          if (/^[A-Z]\d[A-Z]?\s+\S/.test(s)) return true;
+          return false;
+        };
+        // 顺序：先 h1-h3（wrap 生成的 h2 不会被后续正则二次匹配）
+        html = html.replace(
+          /<h[1-4]>([\s\S]*?)<\/h[1-4]>/g,
+          (m, t) => (isProblemTitle(t) ? wrap(t) : m),
+        );
+        // 再裸文本段落题号（如 1900A - Cover in Water）
+        html = html.replace(
+          /<p>(\d{1,4}[A-Z]?\s*[-—–][\s\S]*?)<\/p>/g,
+          (m, t) => (isProblemTitle(t) ? wrap(t) : m),
+        );
+        // 最后粗体题号（如 **A1 - Balanced Shuffle**）
+        html = html.replace(
+          /<p><strong>([\s\S]*?)<\/strong><\/p>/g,
+          (m, t) => (isProblemTitle(t) ? wrap(t) : m),
+        );
+        // 4. 兜底：无任何题号标题时，顶部右对齐链接行
+        if (first && url) {
+          html =
+            `<div style="text-align:right;margin-bottom:10px">` +
+            `<a class="open" href="${url}" target="_blank">打开 ↗</a></div>` +
+            html;
+        }
+        return html;
+      }
+
       /* 保护公式内 markdown 敏感字符：marked 会把 \\ 转义、* 当强调、[] 当链接、
          _ 当下划线（全部破坏 LaTeX）→ 公式段内统一转 HTML 实体绕过 marked，
          MathJax 收到原始 LaTeX */
@@ -1106,20 +1152,9 @@
         }
         if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
         html = html.replace(/<\/script/gi, "&lt;/script");
-        // 标题右侧加"打开"链接（题面=原题，题解=editorial 博客）
+        // 题目标题规范化 + "打开"链接（题面=原题，题解=editorial 博客）
         url = url || (currentProblem ? currentProblem.url : "");
-        if (/<h1>/i.test(html)) {
-          html = html.replace(
-            /<h1>([\s\S]*?)<\/h1>/,
-            `<h1>$1 <a class="open" href="${url}" target="_blank">打开 ↗</a></h1>`,
-          );
-        } else {
-          // 无 h1（如粗体标题的题解）：顶部右对齐插入链接行
-          html =
-            `<div style="text-align:right;margin-bottom:10px">` +
-            `<a class="open" href="${url}" target="_blank">打开 ↗</a></div>` +
-            html;
-        }
+        html = normalizeProblemHeaders(html, url);
         const c = themeColors();
         const frame = el("iframe", "statement-frame");
         frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
