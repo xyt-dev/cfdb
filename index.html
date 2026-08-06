@@ -102,6 +102,10 @@
       .theme-btn:hover {
         border-color: var(--accent);
       }
+      .topbar-btns {
+        display: flex;
+        gap: 10px;
+      }
 
       /* 爬取进度条 */
       .progress-bar {
@@ -473,10 +477,12 @@
       <div class="topbar">
         <div>
           <h1>CF <span class="accent">Database</span></h1>
-          <div class="sub" id="total-line" data-i18n="loading">Loading...</div>
+          <div class="sub" id="total-line">Loading...</div>
         </div>
-        <button class="theme-btn" onclick="toggleLang()">文/En</button>
-        <button class="theme-btn" onclick="toggleTheme()" data-i18n="theme">Theme</button>
+        <div class="topbar-btns">
+          <button class="theme-btn" id="lang-btn" onclick="toggleLang()">文</button>
+          <button class="theme-btn" onclick="toggleTheme()" data-i18n="theme">Theme</button>
+        </div>
       </div>
 
       <div class="progress-bar" id="progress-bar">
@@ -714,6 +720,18 @@
         document.querySelectorAll("[data-i18n]").forEach((el) => {
           el.textContent = t(el.dataset.i18n);
         });
+        // 语言按钮：显示「将要切换到的语言」（英文界面→文，中文界面→En）
+        const lb = document.getElementById("lang-btn");
+        if (lb) lb.textContent = lang === "en" ? "文" : "En";
+        // 计数器：已加载显示统计，未加载显示 loading（避免被静态替换覆盖）
+        if (ALL.length) {
+          const rated = ALL.filter((p) => p.rating).length;
+          $("total-line").textContent = t("totalLine")
+            .replace("{n}", ALL.length)
+            .replace("{r}", rated);
+        } else {
+          $("total-line").textContent = t("loading");
+        }
         document.querySelectorAll("[data-i18n-title]").forEach((el) => {
           el.title = t(el.dataset.i18nTitle);
         });
