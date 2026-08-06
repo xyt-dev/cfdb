@@ -29,43 +29,6 @@ class Html2Md(HTMLParser):
         self._prop_depth = 0
         self._is_prop_value = False
 
-def _detect_code_lang(code: str) -> str:
-    """启发式检测代码语言（CF 题解常见语言）——裸代码块输出语言标注"""
-    c = code[:400]
-    if re.search(r"#include\s*[<\"]", c) or re.search(r"\b(?:cin|cout|endl|std::|vector<|using namespace)\b", c):
-        return "cpp"
-    if re.search(r"\b(?:printf|scanf)\s*\(", c) and "#include" in c:
-        return "c"
-    if re.search(r"\bfn\s+\w+\s*\(", c) and re.search(r"\b(?:let\s+mut|println!|use \w+::)", c):
-        return "rust"
-    if re.search(r"\bfun\s+\w+\s*\(", c):
-        return "kotlin"
-    if re.search(r"\bfunc\s+\w+\s*\(", c) or re.search(r"\bpackage main\b", c):
-        return "go"
-    if re.search(r"\bpublic\s+(?:static\s+)?class\b", c) or "System.out" in c:
-        return "java"
-    if re.search(r"\bdef\s+\w+\s*\(", c) or re.search(r"\bprint\s*\(", c):
-        return "python"
-    if re.search(r"\b(?:function|const|let|var)\s+\w+", c) and "=>" in c:
-        return "javascript"
-    # 弱特征：代码片段（无 include 等强特征，但语法特征明显）
-    if re.search(r"\b(?:long long|vector<|push_back|1ll\b|for \(int \w+\s*=|int main\s*\()", c):
-        return "cpp"
-    # C 风格括号块（if/for/while + {），排除已识别的其他语言
-    if re.search(r"\)\s*\{", c) and not re.search(
-        r"\b(?:def |print\s*\(|fn \w+\s*\(|func \w+\s*\()", c):
-        return "cpp"
-    if re.search(r"\b(?:for \w+ in |range\s*\(|import \w+)", c):
-        return "python"
-    if re.search(r"\b(?:let mut|println!|fn \w+\s*\()", c):
-        return "rust"
-    if re.search(r"\b(?:fmt\.|package main|func \w+\s*\()", c):
-        return "go"
-    if re.search(r"\b(?:System\.out|public class)", c):
-        return "java"
-    return ""
-
-
     # ── 辅助 ──
     def _nl(self):
         """块级换行：先清理行尾空格"""
@@ -254,6 +217,45 @@ def _detect_code_lang(code: str) -> str:
             self.out.append(html_mod.unescape(f"&{name};"))
 
 
+
+def _detect_code_lang(code: str) -> str:
+    """启发式检测代码语言（CF 题解常见语言）——裸代码块输出语言标注"""
+    c = code[:400]
+    if re.search(r"#include\s*[<\"]", c) or re.search(r"\b(?:cin|cout|endl|std::|vector<|using namespace)\b", c):
+        return "cpp"
+    if re.search(r"\b(?:printf|scanf)\s*\(", c) and "#include" in c:
+        return "c"
+    if re.search(r"\bfn\s+\w+\s*\(", c) and re.search(r"\b(?:let\s+mut|println!|use \w+::)", c):
+        return "rust"
+    if re.search(r"\bfun\s+\w+\s*\(", c):
+        return "kotlin"
+    if re.search(r"\bfunc\s+\w+\s*\(", c) or re.search(r"\bpackage main\b", c):
+        return "go"
+    if re.search(r"\bpublic\s+(?:static\s+)?class\b", c) or "System.out" in c:
+        return "java"
+    if re.search(r"\bdef\s+\w+\s*\(", c) or re.search(r"\bprint\s*\(", c):
+        return "python"
+    if re.search(r"\b(?:function|const|let|var)\s+\w+", c) and "=>" in c:
+        return "javascript"
+    # 弱特征：代码片段（无 include 等强特征，但语法特征明显）
+    if re.search(r"\b(?:long long|vector<|push_back|1ll\b|for \(int \w+\s*=|int main\s*\()", c):
+        return "cpp"
+    # C 风格括号块（if/for/while + {），排除已识别的其他语言
+    if re.search(r"\)\s*\{", c) and not re.search(
+        r"\b(?:def |print\s*\(|fn \w+\s*\(|func \w+\s*\()", c):
+        return "cpp"
+    if re.search(r"\b(?:for \w+ in |range\s*\(|import \w+)", c):
+        return "python"
+    if re.search(r"\b(?:let mut|println!|fn \w+\s*\()", c):
+        return "rust"
+    if re.search(r"\b(?:fmt\.|package main|func \w+\s*\()", c):
+        return "go"
+    if re.search(r"\b(?:System\.out|public class)", c):
+        return "java"
+    return ""
+
+
+
 def _normalize_math(md: str) -> str:
     """CF 用 $$$ 包裹公式，MathJax 会把 $$$x$$$ 误解析成 $$ + $x（渲染出前导 $）。
     统一转为单 $ 内联公式：$$$x$$$ → $x$"""
@@ -314,8 +316,13 @@ def _extract_div(html_text: str, target_class: str) -> str:
 
 
 def editorial_to_md(html_text: str) -> str:
-    """博客题解转 markdown（提取 .ttypography 内容；与题面共用空格/页脚/公式归一化）"""
-    src = _extract_div(html_text, "ttypography")
+    """博客题解转 markdown：只取第一个 .ttypography（正文）。
+    CF 博客中每个评论也是独立 ttypography 容器，且页面 div 常未闭合
+    导致 _extract_div 提取过头 —— 用正则截到下一个 ttypography 前"""
+    m = re.search(
+        r'<div class="ttypography">(.*?)(?=<div class="ttypography"|<script|$)',
+        html_text, re.S)
+    src = m.group(1) if m else _extract_div(html_text, "ttypography")
     if not src.strip():
         src = html_text  # 兜底：全文
     p = Html2Md()
