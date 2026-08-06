@@ -1128,6 +1128,7 @@ hr { border:none; border-top:1px solid ${c.border}; margin:18px 0; }
 .hljs-meta, .hljs-selector-class, .hljs-selector-id { color:${c.r2100}; }
 .hljs-params { color:${c.text}; }
 .hljs-deletion { color:${c.accent2}; }
+.img-missing { color:${c.subtext}; font-size:12px; font-style:italic; opacity:.85; }
 ul,ol { padding-left: 24px; margin: 8px 0; }
 li { margin: 4px 0; }
 blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px; color:#889; }
@@ -1145,9 +1146,17 @@ document.querySelectorAll('pre code').forEach(function(el){
     }
   } catch(e) {}
 });
-/* 图片加载失败：隐藏破图图标 */
+/* 图片加载失败：显示占位提示（不隐藏，明确告知） */
 document.addEventListener('error', function(e){
-  if (e.target && e.target.tagName === 'IMG') e.target.style.display = 'none';
+  if (e.target && e.target.tagName === 'IMG') {
+    var img = e.target;
+    if (img.parentNode) {
+      var hint = document.createElement('span');
+      hint.className = 'img-missing';
+      hint.textContent = '🖼️ 图片未加载';
+      img.parentNode.replaceChild(hint, img);
+    }
+  }
 }, true);
 /* 所有链接强制新标签打开（防止 iframe 内导航渲染） */
 document.addEventListener('click', function(e){
