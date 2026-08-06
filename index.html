@@ -1121,12 +1121,16 @@
       /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h4），
          统一渲染为 h2 + 前后分割线；标题本身链接到原题（titleLink 回调） */
       function normalizeProblemHeaders(html, url, titleLink) {
+        let first = true;
         const wrap = (text) => {
           const href = titleLink ? titleLink(text.trim()) : null;
           const inner = href
             ? `<a class="ptitle" href="${href}" target="_blank" title="在 Codeforces 打开原题">${text}</a>`
             : text;
-          return `<hr><h2>${inner}</h2><hr>`;
+          // 第一个题目标题后行内插「打开 ↗」（editorial 博客链接）
+          const open = first && url ? ` <a class="open" href="${url}" target="_blank">打开 ↗</a>` : "";
+          first = false;
+          return `<hr><h2>${inner}${open}</h2><hr>`;
         };
         const isProblemTitle = (t) => {
           const s = t.trim();
@@ -1218,9 +1222,21 @@
         }
         if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
         html = html.replace(/<\/script/gi, "&lt;/script");
-        // 题目标题规范化 + 标题链接到原题（题面=原题，题解=editorial 博客右上角打开）
+        // 题目标题规范化 + 标题链接到原题（题面=原题，题解=editorial 博客标题内行内打开）
         url = url || (currentProblem ? currentProblem.url : "");
         html = normalizeProblemHeaders(html, url, problemHref);
+        // 题面 tab：h1 标题未被 wrap（点号格式不匹配题号）→ 行内插「打开 ↗」
+        if (url && !html.includes('class="open"')) {
+          if (/<h1>/.test(html)) {
+            html = html.replace(
+              /(<h1>[\s\S]*?)(<\/h1>)/,
+              `$1 <a class="open" href="${url}" target="_blank">打开 ↗</a>$2`,
+            );
+          } else {
+            // 兜底：无任何标题 → 内容开头行内链接（不占整行）
+            html = `<a class="open" href="${url}" target="_blank" style="float:right">打开 ↗</a>` + html;
+          }
+        }
         const c = themeColors();
         const frame = el("iframe", "statement-frame");
         frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
@@ -1236,9 +1252,9 @@ code { background:${c.surface}; padding:1px 6px; border-radius:4px; font-size:13
 pre code { background:none; padding:0; }
 h1 { font-size:21px; margin:6px 0 14px; font-family:${sansStack}; }
 /* 右上角「打开 ↗」（fixed 相对 iframe 视口） */
-.toplink { display:block; text-align:right; margin-bottom:10px;
-  font:13px ${sansStack}; color:${c.accent}; text-decoration:none; }
-.toplink:hover { text-decoration:underline; }
+.open { font-size:13px; font-weight:400; color:${c.accent}; text-decoration:none;
+  margin-left:12px; font-family:${sansStack}; vertical-align:middle; white-space:nowrap; }
+.open:hover { text-decoration:underline; }
 /* 题号标题链接到原题 */
 a.ptitle { color:${c.accent}; text-decoration:none; }
 a.ptitle:hover { text-decoration:underline; }
@@ -1274,7 +1290,7 @@ details.fold .fold-body > :first-child { margin-top:6px; }
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]},startup:{typeset:false}};<\/script>
 <script src="/vendor/tex-svg-full.js"><\/script>
-</head><body>${url ? `<a class="toplink" href="${url}" target="_blank">打开 ↗</a>` : ""}<div id="md">${html}</div>
+</head><body><div id="md">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
 /* ═══ Hint/Solution/Tutorial 等小节 → 可折叠 ═══
