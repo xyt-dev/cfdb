@@ -28,6 +28,7 @@ class Html2Md(HTMLParser):
         self._in_property = False  # 时间/内存限制块
         self._prop_depth = 0
         self._is_prop_value = False
+        self._bold_pending = 0   # <b> 延迟输出计数（空粗体 <b><br/></b> 不产生 **）
 
     # ── 辅助 ──
     def _nl(self):
@@ -130,9 +131,10 @@ class Html2Md(HTMLParser):
             self.out.append("\n")
             return
 
-        # 行内格式
+        # 行内格式：粗体延迟输出（等有内容再 flush；空粗体直接丢弃）
         if tag == "b" or tag == "strong":
-            self.out.append("**")
+            self._bold_pending += 1
+            return
         elif tag == "i" or tag == "em":
             self.out.append("*")
         elif tag == "code":
@@ -188,7 +190,10 @@ class Html2Md(HTMLParser):
             self.out.append("\n")
             return
         if tag in ("b", "strong"):
-            self.out.append("**")
+            if self._bold_pending > 0:
+                self._bold_pending -= 1  # 无内容即闭合：空粗体丢弃
+            else:
+                self.out.append("**")
         elif tag in ("i", "em"):
             self.out.append("*")
         elif tag == "code":
@@ -210,6 +215,9 @@ class Html2Md(HTMLParser):
         data = data.replace("\r", " ").replace("\n", " ")
         # 保留所有文本节点（含纯空格节点）——跨标签的空格不能丢，否则文字连在一起
         if data:
+            if self._bold_pending:
+                self.out.append("**" * self._bold_pending)
+                self._bold_pending = 0
             self.out.append(data)
 
     def handle_entityref(self, name):
@@ -371,27 +379,35 @@ def _clean(lines) -> str:
     # 行内连续空格压缩 + 修复孤立 **（跳过 ``` 代码块，保护样例对齐）
     out_lines = []
     in_code = False
-    for line in text.split("\n"):
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
         if line.strip() == "```":
             in_code = not in_code
         if not in_code:
             line = re.sub(r"[ \t]{2,}", " ", line).rstrip()
-            line = _fix_broken_bold(line)
+            line = _fix_broken_bold(line, lines[i + 1] if i + 1 < len(lines) else None)
         out_lines.append(line)
     text = "\n".join(out_lines)
     text = _strip_footer(text)
     return text.strip() + "\n"
 
 
-def _fix_broken_bold(line: str) -> str:
-    """修复 CF 老博客标签残缺产生的孤立 **（如 <b><br/></b> 空粗体）：
-    行内 ** 为奇数个时——单独行删除、行尾孤立删除、行首孤立删除开标记"""
-    if line.count("**") % 2 == 1:
-        if line.strip() == "**":
+def _fix_broken_bold(line: str, next_line: str | None = None) -> str:
+    """修复孤立 **（<b><br/></b> 空粗体等标签残缺）：
+    只统计公式 $...$ 与行内代码 `...` 之外的 **（其中的 ** 是字面记号，不动）；
+    奇数个时——单独行删除、行尾孤立删除、行首孤立删开标记
+    （若下一行以 ** 结尾则视为跨行粗体闭合，保留）"""
+    masked = re.sub(r"\$[^$\n]*\$|`[^`\n]*`", lambda m: "\x00" * len(m.group(0)), line)
+    n = masked.count("**")
+    if n % 2 == 1:
+        if masked.strip() == "**":
             return ""
-        if line.endswith("**") and line.count("**") == 1:
+        if masked.endswith("**") and n == 1:
             return line[:-2]
-        if line.startswith("**"):
+        if masked.startswith("**") and n == 1:
+            # 跨行粗体续行：下一行以 ** 结尾（闭标记）→ 保留
+            if next_line is not None and next_line.rstrip().endswith("**"):
+                return line
             return line[2:]
     return line
 
