@@ -2,6 +2,16 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [Unreleased]
+
+### 新增
+
+- **PDF 题面爬取**：CF 部分比赛（ACM 老赛 1089/1090/1181 等）无 HTML 题面、只提供 PDF → 探测 content-type 后下载 + `pdftotext` 提取转 md（标注「仅 PDF 题面，公式可能失真」，标题从 `Problem X. Name` 行提取）
+
+### 修复
+
+- **cfcrawl 参数校验拒绝数字题号**：`fetch_statement_md` 的 `idx.isalpha()` 与 server 同 bug（A1/B2/F1 → 直接失败）→ 改字母开头 + alnum；**264 个 failed_statements 全部重爬恢复（0 失败）**：171 个 isalpha bug + 73 个 PDF 题面 + 2 个限流/超时
+
 ## [v2.0.0] - 2026-08-06
 
 ### 新增
