@@ -182,6 +182,10 @@ class Html2Md(HTMLParser):
                     self._flush_pre()
             return
         if self.in_pre:
+            if tag == "div":
+                # CF 样例行用 <div class="test-example-line"> 每行一个 div——
+                # div 结束补换行（否则各行文本被拼成单行）
+                self.pre_buf.append("\n")
             return
 
         if tag == "div" and self._in_title and self._title_depth > 0:

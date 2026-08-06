@@ -29,7 +29,8 @@
       }
       @font-face {
         font-family: "CodeNewRoman Nerd Font Mono";
-        src: url("/vendor/CodeNewRomanNerdFontMono-Regular.otf") format("opentype");
+        src: url("/vendor/CodeNewRomanNerdFontMono-Regular.otf")
+          format("opentype");
         font-weight: 400;
         font-style: normal;
       }
@@ -41,14 +42,17 @@
       }
       @font-face {
         font-family: "CodeNewRoman Nerd Font Mono";
-        src: url("/vendor/CodeNewRomanNerdFontMono-Italic.otf") format("opentype");
+        src: url("/vendor/CodeNewRomanNerdFontMono-Italic.otf")
+          format("opentype");
         font-weight: 400;
         font-style: italic;
       }
       :root {
         --radius: 10px;
-        --sans: "CodeNewRoman Nerd Font", "Noto Sans SC", "PingFang SC", sans-serif;
-        --serif: "CodeNewRoman Nerd Font", Georgia, "Noto Serif SC", "Songti SC", serif;
+        --sans:
+          "CodeNewRoman Nerd Font", "Noto Sans SC", "PingFang SC", sans-serif;
+        --serif:
+          "CodeNewRoman Nerd Font", Georgia, "Noto Serif SC", "Songti SC", serif;
       }
       /* ═══ Catppuccin Mocha ═══ */
       [data-theme="catppuccin"] {
@@ -373,16 +377,45 @@
         width: 72px; /* 固定宽度：中英链接文字位置稳定 */
       }
       /* ═══ 本地解题代码复制按钮（与 srcdoc 样例框同逻辑）═══ */
-      .copy-wrap { position: relative; }
-      .copy-btn { position:absolute; top:6px; right:8px; z-index:5;
-        font:14px "CodeNewRoman Nerd Font", var(--sans); color:var(--accent);
-        background:transparent; border:1px solid transparent; border-radius:6px;
-        width:24px; height:24px; padding:0; line-height:24px; text-align:center;
-        cursor:pointer; opacity:0; transition:opacity .15s; user-select:none;
-        box-sizing:border-box; }
-      .copy-wrap:hover .copy-btn, .copy-btn:focus { opacity:1; }
-      .copy-btn:hover { color:var(--text); background:var(--surface2); border-color:var(--border); }
-      .copy-btn.ok { color:var(--teal); border-color:var(--border); }
+      .copy-wrap {
+        position: relative;
+      }
+      .copy-btn {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        z-index: 5;
+        font:
+          14px "CodeNewRoman Nerd Font",
+          var(--sans);
+        color: var(--accent);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        line-height: 24px;
+        text-align: center;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.15s;
+        user-select: none;
+        box-sizing: border-box;
+      }
+      .copy-wrap:hover .copy-btn,
+      .copy-btn:focus {
+        opacity: 1;
+      }
+      .copy-btn:hover {
+        color: var(--text);
+        background: var(--surface2);
+        border-color: var(--border);
+      }
+      .copy-btn.ok {
+        color: var(--teal);
+        border-color: var(--border);
+      }
       .name {
         max-width: 340px;
       }
@@ -624,12 +657,24 @@
     <div class="container" id="list-view">
       <div class="topbar">
         <div>
-          <h1><img class="title-icon" src="/vendor/cf-favicon.png" alt="CF" />CF <span class="accent">Database</span></h1>
+          <h1>
+            <img class="title-icon" src="/vendor/cf-favicon.png" alt="CF" />CF
+            <span class="accent">Database</span>
+          </h1>
           <div class="sub" id="total-line">Loading...</div>
         </div>
         <div class="topbar-btns">
-          <button class="theme-btn" id="lang-btn" onclick="toggleLang()">文</button>
-          <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" data-i18n="theme">Theme</button>
+          <button class="theme-btn" id="lang-btn" onclick="toggleLang()">
+            文
+          </button>
+          <button
+            class="theme-btn"
+            id="theme-btn"
+            onclick="toggleTheme()"
+            data-i18n="theme"
+          >
+            Theme
+          </button>
         </div>
       </div>
 
@@ -643,7 +688,8 @@
       <div class="filters">
         <button
           class="reset-btn mini"
-          data-i18n-title="resetTitle" title="Reset filters"
+          data-i18n-title="resetTitle"
+          title="Reset filters"
           onclick="resetFilters()"
         >
           <span data-i18n="reset">Default</span>
@@ -677,16 +723,25 @@
           ><input
             type="text"
             id="f-search"
-            placeholder="e.g. tree / dp / 1400..." data-i18n-ph="searchPh"
+            placeholder="e.g. tree / dp / 1400..."
+            data-i18n-ph="searchPh"
           />
         </div>
         <div>
           <label data-i18n="sort">Sort</label>
           <select id="f-sort">
-            <option value="rating-desc" data-i18n-opt="ratingDesc">Rating ↓</option>
-            <option value="rating-asc" data-i18n-opt="ratingAsc">Rating ↑</option>
-            <option value="solved-desc" data-i18n-opt="solvedDesc">Solved ↓</option>
-            <option value="solved-asc" data-i18n-opt="solvedAsc">Solved ↑</option>
+            <option value="rating-desc" data-i18n-opt="ratingDesc">
+              Rating ↓
+            </option>
+            <option value="rating-asc" data-i18n-opt="ratingAsc">
+              Rating ↑
+            </option>
+            <option value="solved-desc" data-i18n-opt="solvedDesc">
+              Solved ↓
+            </option>
+            <option value="solved-asc" data-i18n-opt="solvedAsc">
+              Solved ↑
+            </option>
             <option value="id-asc" selected data-i18n-opt="idAsc">ID ↑</option>
             <option value="id-desc" data-i18n-opt="idDesc">ID ↓</option>
             <option value="name-asc" data-i18n-opt="nameAsc">Name</option>
@@ -716,7 +771,17 @@
     <div id="detail-view">
       <div class="detail-bar">
         <button class="back-btn" onclick="goBack()">
-          <svg class="back-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg><span data-i18n="back">Back</span>
+          <svg
+            class="back-arrow"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M15 5l-7 7 7 7" /></svg
+          ><span data-i18n="back">Back</span>
         </button>
         <div class="detail-title" id="detail-title"></div>
         <div class="detail-meta" id="detail-meta"></div>
@@ -788,19 +853,35 @@
           stageDone: "Done",
           stageError: "Error",
           stageIdle: "Idle",
-          progress: "{stage}: {done}/{total} (fetched {fetched}, cached {cached}, failed {failed})",
+          progress:
+            "{stage}: {done}/{total} (fetched {fetched}, cached {cached}, failed {failed})",
           detailMeta: "Rating: {r} · Solved: {s} · {tags}",
           readerLoading: "Loading...",
-          noStatement: "Statement not downloaded yet.\n\nThe server auto-crawls on startup (progress bar on top),\nor run: python3 update.py --statements",
+          noStatement:
+            "Statement not downloaded yet.\n\nThe server auto-crawls on startup (progress bar on top),\nor run: python3 update.py --statements",
           loadFail: "Load failed: ",
-          noEditorialKnown: "This contest has no public Editorial (official solutions not published).",
-          noEditorialUnknown: "No public Editorial for this contest (or crawl failed).\n\nYou can pre-crawl: python3 update.py --editorials",
+          noEditorialKnown:
+            "This contest has no public Editorial (official solutions not published).",
+          noEditorialUnknown:
+            "No public Editorial for this contest (or crawl failed).\n\nYou can pre-crawl: python3 update.py --editorials",
           editorialFail: "Editorial load failed: ",
           mySolutions: "💻 My Solutions",
           openProblem: "Open on Codeforces",
           openTop: "Open ↗",
           imgMissing: "🖼️ Image not loaded",
-          langName: { rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C", py: "Python", java: "Java", go: "Go", ts: "TypeScript", js: "JavaScript", kt: "Kotlin" },
+          langName: {
+            rs: "Rust",
+            cpp: "C++",
+            cc: "C++",
+            cxx: "C++",
+            c: "C",
+            py: "Python",
+            java: "Java",
+            go: "Go",
+            ts: "TypeScript",
+            js: "JavaScript",
+            kt: "Kotlin",
+          },
         },
         zh: {
           title: "Codeforces Database — Codeforces 题目库",
@@ -843,23 +924,38 @@
           stageDone: "完成",
           stageError: "异常",
           stageIdle: "空闲",
-          progress: "{stage}：{done}/{total}（已爬 {fetched}，已有 {cached}，失败 {failed}）",
+          progress:
+            "{stage}：{done}/{total}（已爬 {fetched}，已有 {cached}，失败 {failed}）",
           detailMeta: "分数: {r} · 解题: {s} · {tags}",
           readerLoading: "加载中...",
-          noStatement: "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
+          noStatement:
+            "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
           loadFail: "加载失败：",
           noEditorialKnown: "该比赛没有公开的 Editorial（官方未发布题解）。",
-          noEditorialUnknown: "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
+          noEditorialUnknown:
+            "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
           editorialFail: "题解加载失败：",
           mySolutions: "💻 我的解题代码",
           openProblem: "在 Codeforces 打开原题",
           openTop: "打开 ↗",
           imgMissing: "🖼️ 图片未加载",
-          langName: { rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C", py: "Python", java: "Java", go: "Go", ts: "TypeScript", js: "JavaScript", kt: "Kotlin" },
+          langName: {
+            rs: "Rust",
+            cpp: "C++",
+            cc: "C++",
+            cxx: "C++",
+            c: "C",
+            py: "Python",
+            java: "Java",
+            go: "Go",
+            ts: "TypeScript",
+            js: "JavaScript",
+            kt: "Kotlin",
+          },
         },
       };
       function t(key) {
-        return ((I18N[lang] || I18N.en)[key]) ?? ((I18N.en)[key]) ?? key;
+        return (I18N[lang] || I18N.en)[key] ?? I18N.en[key] ?? key;
       }
       function toggleLang() {
         lang = lang === "en" ? "zh" : "en";
@@ -902,7 +998,8 @@
       }
       function rebuildDetail() {
         if (!currentProblem) return;
-        $("detail-title").textContent = `${currentProblem.contestId}${currentProblem.index} — ${currentProblem.name}`;
+        $("detail-title").textContent =
+          `${currentProblem.contestId}${currentProblem.index} — ${currentProblem.name}`;
         $("detail-meta").textContent = t("detailMeta")
           .replace("{r}", currentProblem.rating ?? "—")
           .replace("{s}", fmt(currentProblem.solvedCount))
@@ -910,7 +1007,9 @@
         const reader = $("reader");
         reader.replaceChildren();
         if (tabCache[currentTab]) {
-          reader.appendChild(mdFrame(tabCache[currentTab].md, tabCache[currentTab].url));
+          reader.appendChild(
+            mdFrame(tabCache[currentTab].md, tabCache[currentTab].url),
+          );
           if (currentTab === "statement") renderSolutions(reader);
         } else {
           loadTab(currentTab);
@@ -1310,11 +1409,7 @@
             if (seq !== loadSeq) return; // 已切走（tab/题目变了），丢弃过期响应
             reader.replaceChildren();
             if (!d.md) {
-              const hint = el(
-                "div",
-                "hint",
-                t("noStatement"),
-              );
+              const hint = el("div", "hint", t("noStatement"));
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
               tabCache[tab] = null;
@@ -1393,21 +1488,30 @@
           const flash = (ok) => {
             btn.textContent = ok ? "\uf00c" : "\uf0c5";
             if (ok) btn.classList.add("ok");
-            setTimeout(() => { btn.textContent = "\uf0c5"; btn.classList.remove("ok"); }, 1500);
+            setTimeout(() => {
+              btn.textContent = "\uf0c5";
+              btn.classList.remove("ok");
+            }, 1500);
           };
           const fallback = () => {
             const ta = document.createElement("textarea");
             ta.value = txt;
-            ta.style.position = "fixed"; ta.style.opacity = "0";
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
             document.body.appendChild(ta);
             ta.select();
             let ok = false;
-            try { ok = document.execCommand("copy"); } catch (e) {}
+            try {
+              ok = document.execCommand("copy");
+            } catch (e) {}
             document.body.removeChild(ta);
             return ok;
           };
           if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(txt).then(() => flash(true), () => flash(fallback()));
+            navigator.clipboard.writeText(txt).then(
+              () => flash(true),
+              () => flash(fallback()),
+            );
           } else {
             flash(fallback());
           }
@@ -1484,9 +1588,12 @@
           r2100: pick("--r2100"),
         };
       }
-      const serifStack = '"CodeNewRoman Nerd Font", Georgia, "Noto Serif SC", "Songti SC", serif';
-      const sansStack = '"CodeNewRoman Nerd Font", "Noto Sans SC", "PingFang SC", sans-serif';
-      const monoStack = '"CodeNewRoman Nerd Font Mono", "JetBrains Mono", "Fira Code", Consolas, monospace';
+      const serifStack =
+        '"CodeNewRoman Nerd Font", Georgia, "Noto Serif SC", "Songti SC", serif';
+      const sansStack =
+        '"CodeNewRoman Nerd Font", "Noto Sans SC", "PingFang SC", sans-serif';
+      const monoStack =
+        '"CodeNewRoman Nerd Font Mono", "JetBrains Mono", "Fira Code", Consolas, monospace';
 
       /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h4），
          统一渲染为 h2 + 前后分割线；标题本身链接到原题（titleLink 回调） */
@@ -1526,15 +1633,21 @@
          _ 当下划线（全部破坏 LaTeX）→ 公式段内统一转 HTML 实体绕过 marked，
          MathJax 收到原始 LaTeX */
       function protectMathContent(md) {
-        return md.replace(/(\$\$?[^$]*?\$\$?)/g, function (m) {
-          return m
-            .replace(/\\/g, "&#92;")
-            .replace(/\*/g, "&#42;")
-            .replace(/_/g, "&#95;")
-            .replace(/\[/g, "&#91;")
-            .replace(/\]/g, "&#93;")
-            .replace(/\`/g, "&#96;");
-        });
+        // 块公式 $$...$$（跨行）或行内公式 $...$：
+        // 开 $ 前不能是 $（防闭 $ 当开 $ 错位配对）、闭 $ 后不能是 $（防连写 $a$$b$ 吞掉）；
+        // 行内内容允许 $ 但不允许换行（换行挡住——长文本/样例块不会被吞进公式段）
+        return md.replace(
+          /(\$\$[\s\S]*?\$\$)|((?<!\$)\$[^\n]*?\$)/g,
+          function (m) {
+            return m
+              .replace(/\\/g, "&#92;")
+              .replace(/\*/g, "&#42;")
+              .replace(/_/g, "&#95;")
+              .replace(/\[/g, "&#91;")
+              .replace(/\]/g, "&#93;")
+              .replace(/\`/g, "&#96;");
+          }
+        );
       }
 
       /* 题目标题 → Codeforces 原题链接：
@@ -1623,6 +1736,7 @@ a.ptitle { color:${c.accent}; text-decoration:none; }
 a.ptitle:hover { text-decoration:underline; }
 h2 { font-size:19px; color:${c.accent}; margin:22px 0 8px; font-family:${sansStack}; }
 h3 { font-size:15.5px; margin:18px 0 6px; }
+h4 { font-size:15.5px; font-weight:700; margin:16px 0 6px; color:${c.accent}; }
 a { color:${c.accent}; }
 hr { border:none; border-top:1px solid ${c.border}; margin:18px 0; }
 /* ═══ 代码高亮配色（内联当前主题色值）═══ */

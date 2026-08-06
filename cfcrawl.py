@@ -350,6 +350,7 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
     token = m.group(1)
     # 2. 逐个 POST problemCode
     out = {}
+    missing = []  # API 明确 success=="false"（官方未发布）——占位删除，不整场丢弃
     for code in codes:
         try:
             r = subprocess.run(
@@ -361,6 +362,7 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
                  "https://codeforces.com/data/problemTutorial"],
                 capture_output=True, timeout=30)
             d = json.loads(r.stdout)
+            # success 是字符串（"true"/"false"）——"false" 不能当真值
             if d.get("success") in (True, "true") and d.get("html"):
                 tmd = html2md.editorial_to_md(d["html"])
                 # 保留/补全题号标题：API html 的 <h3>标题</h3> 在 ttypography 外
@@ -370,10 +372,18 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
                     if tm:
                         tmd = f"## {tm.group(1)}\n\n" + tmd.strip()
                     out[code] = tmd.strip()
+            elif d.get("success") in (False, "false"):
+                missing.append(code)
         except Exception:
-            pass
+            pass  # 网络/解析失败：不算确认缺失（整场 @temp 可重试）
         time.sleep(0.3)  # 限速防反爬
-    return out
+    return out, missing
+
+
+def _drop_tutorial_placeholder(md: str, idx: str) -> str:
+    """API 确认无题解（success=="false"，官方未发布）→ 删除该题的占位符。
+    只删占位文本（可能只剩标题壳/空），不整场丢弃其他题"""
+    return re.sub(r'\n*Tutorial is loading\.\.\.\n*', '\n', md, count=1)
 
 
 def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
@@ -447,12 +457,13 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     md = html2md.editorial_to_md(blog_html)
     # md 层替换占位符为真实题解（避免 HTML 层 ttypography 嵌套截断）
     if codes and "Tutorial is loading" in md:
-        tutorials = _fetch_problem_tutorials(cid, codes)
+        tutorials, missing = _fetch_problem_tutorials(cid, codes)
         for code, tmd in tutorials.items():
             idx = code[len(cid):]  # "1970A1" → "A1"
             md = _replace_tutorial(md, idx, tmd)
-            if "Tutorial is loading" not in md:
-                break
+        for code in missing:  # API 确认无题解（官方未发布）→ 删占位，不整场丢弃
+            idx = code[len(cid):]
+            md = _drop_tutorial_placeholder(md, idx)
     # 全局去重题号标题（根本层兜底——原文标题 + tmd 标题重复只留第一个）
     md = html2md._dedupe_problem_headers(md)
     # 写前校验：错误页/占位残留/过短 = 假题解，不写文件（@temp 可重试）
