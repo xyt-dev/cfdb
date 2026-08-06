@@ -11,15 +11,42 @@
 - **浏览器前进/后退支持**：详情页使用 `pushState` + `popstate`，「← 返回」按钮与浏览器后退行为完全一致（含无历史时兜底）
 - **题面图片爬取**：题面内 `<img>` 识别（过滤头像/国旗/站点装饰图），按题号命名保存至 `statements/images/{题号}_{n}.png`，md 内正确位置渲染（`/images/` 路由）
 - **题解图片爬取**：editorial 博客配图同样本地化（`editorials/images/{比赛号}_{n}.png`，`/eimages/` 路由）
+- **图片等比缩放**：`max-width:100% + height:auto`，超宽图片不溢出容器、保持纵横比
+- **图片加载失败占位提示**：显示「🖼️ 图片未加载」而非隐藏/破图图标
 
 ### 修复
 
+- **图片路由恢复**：移除 shiki 时误删 `/images/` `/eimages/` 路由 → 已恢复（content-type 按扩展名）
 - **题解代码高亮**：md 代码块语言标注（html2md 启发式检测：`#include`/`cin`/`cout`→cpp、`def`/`print(`→python、`fn`+`let`→rust 等；含弱特征：`long long`/`for (int`/`1ll`/C 风格 `){`）
 - **围栏配对错乱**：正则无法区分开/闭围栏 → 改为逐行状态机识别，已爬 md 批量补救（含前导空格围栏）
 - **iframe 内代码颜色不显示**：srcdoc 是独立文档不继承父页 CSS/CSS 变量 → hljs 配色按当前主题色值内联注入 srcdoc
 - **公式渲染延迟**：MathJax 由 CDN + CHTML（需下载字体）改为**本地 tex-svg**（离线、SVG 输出无字体依赖，渲染即完成）
 - **solutions 语言识别失败**：`ext` 字段带点（`.cpp`）与语言映射键不匹配 → 去点处理（`.cpp`→`cpp`）
 - **爬取性能**：已预爬题秒跳过（不再每道 sleep 0.2s）；失败题记忆到 `failed_statements.json`（避免反复重试拖慢遍历）；批量模式单次尝试 + 短超时
+
+### 公式保护链（渲染层防线）
+
+CF 题面/题解公式是原始 LaTeX，需穿越 markdown 渲染（marked）不被破坏，再到 MathJax。共四层防线：
+
+```
+md（原始 LaTeX，含 \\ 换行、* 乘法、[] 艾弗森括号）
+  ↓ ① protectMathContent：公式段内 markdown 敏感字符实体化
+  │    \ → &#92;   * → &#42;   _ → &#95;
+  │    [ → &#91;    ] → &#93;   ` → &#96;
+  │    （marked 不解析实体 → LaTeX 原样通过）
+  ↓ ② marked：markdown → HTML（实体保持）
+  ↓ ③ HTML 解析：实体解码还原原始 LaTeX 字符
+  ↓ ④ MathJax tex-svg-full：完整 TeX 渲染为 SVG
+```
+
+| 修复 | 根因 |
+|---|---|
+| **`\\` 换行被破坏** | marked 把 LaTeX 的 `\\`（多行换行命令）当 markdown 转义 → 输出单 `\` → MathJax 收到残缺 `\k`、`\=` → **红色未知命令乱码** |
+| **`*` 乘法被拆断** | marked 把公式内成对 `*`（如 `(n-i)*\sum...*`）解析为强调 → `<em>` 标签**拆断公式** → MathJax 无法识别 |
+| **`[]` 被当链接** | 艾弗森括号 `[gcd(a_i,a_j)=k]` 被 marked 当链接文本处理 |
+| **`_` 被当强调** | LaTeX 下标 `a_i` 的 `_` 被 marked 解析为斜体标记 |
+| **`\color` 扩展缺失** | 精简版 tex-svg.js 缺扩展 → typeset 整体失败 → 换 tex-svg-full.js（含全部扩展） |
+| **自动+手动重复 typeset** | MathJax 默认自动渲染 + 手动 `typesetPromise` 双重处理 → `splitText` 越界 → 换 `startup:{typeset:false}` 单次渲染 |
 
 ## [v1.0.0] - 2026-08-06
 
