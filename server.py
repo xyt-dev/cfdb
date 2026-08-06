@@ -159,7 +159,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
             else:
                 md = cfcrawl.read_editorial_md(cid) or cfcrawl.fetch_editorial_md(cid)
-                self._send(200, json.dumps({"md": md}).encode(), "application/json")
+                url = cfcrawl.read_editorial_url(cid)
+                self._send(200, json.dumps({"md": md, "url": url}).encode(), "application/json")
         elif u.path == "/api/solution":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]

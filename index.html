@@ -940,7 +940,7 @@
         const reader = $("reader");
         reader.replaceChildren();
         if (tabCache[tab]) {
-          reader.appendChild(mdFrame(tabCache[tab].md));
+          reader.appendChild(mdFrame(tabCache[tab].md, tabCache[tab].url));
           // 缓存恢复也要渲染题面底部的解题代码
           if (tab === "statement") renderSolutions(reader);
           return;
@@ -967,8 +967,8 @@
               tabCache[tab] = null;
               return;
             }
-            tabCache[tab] = { md: d.md };
-            reader.appendChild(mdFrame(d.md));
+            tabCache[tab] = { md: d.md, url: currentProblem.url };
+            reader.appendChild(mdFrame(d.md, currentProblem.url));
             // 题面底部渲染自己的解题代码（无则跳过，不渲染空框）
             renderSolutions(reader);
           })
@@ -995,8 +995,8 @@
               reader.appendChild(hint);
               return;
             }
-            tabCache.editorial = { md: d.md };
-            reader.appendChild(mdFrame(d.md));
+            tabCache.editorial = { md: d.md, url: d.url };
+            reader.appendChild(mdFrame(d.md, d.url));
           })
           .catch((err) => {
             reader.replaceChildren();
@@ -1097,7 +1097,7 @@
         });
       }
 
-      function mdFrame(md) {
+      function mdFrame(md, url) {
         let html;
         try {
           html = window.marked ? marked.parse(protectMathContent(md)) : null;
@@ -1106,8 +1106,8 @@
         }
         if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
         html = html.replace(/<\/script/gi, "&lt;/script");
-        // 题面标题（首个 h1）右侧加"打开"原题链接
-        const url = currentProblem ? currentProblem.url : "";
+        // 标题（首个 h1）右侧加"打开"链接（题面=原题，题解=editorial 博客）
+        url = url || (currentProblem ? currentProblem.url : "");
         html = html.replace(
           /<h1>([\s\S]*?)<\/h1>/,
           `<h1>$1 <a class="open" href="${url}" target="_blank">打开 ↗</a></h1>`,

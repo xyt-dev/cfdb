@@ -213,6 +213,15 @@ def read_editorial_md(cid) -> str | None:
         return None
 
 
+def read_editorial_url(cid) -> str | None:
+    """读取 editorial 原链接（.url 文件）"""
+    try:
+        with open(editorial_path(cid) + ".url", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
 def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     """爬取比赛题解转 md 并缓存（contest 页找 editorial 链接 → 爬博客）"""
     contest_url = f"https://codeforces.com/contest/{cid}"
@@ -229,6 +238,13 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     blog_html = fetch_url(link)
     if not blog_html:
         return None
+    # 保存 editorial 原链接（题解 tab 的"打开"按钮用）
+    try:
+        os.makedirs(EDITORIAL_DIR, exist_ok=True)
+        with open(editorial_path(cid) + ".url", "w", encoding="utf-8") as f:
+            f.write(link)
+    except OSError:
+        pass
     md = html2md.editorial_to_md(blog_html)
     if not md.strip():
         return None
