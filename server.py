@@ -174,8 +174,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     md = cfcrawl.fetch_editorial_md(cid)
                     if not md:
                         # 按需探测也记忆（确认无题解/网络失败）→ 下次秒回
-                        cfcrawl._remember_failed_editorial(cid)
-                        known = True
+                        # 公告态（@announcement）不记：题解发布后可自动爬取
+                        if f"{cid}@announcement" not in cfcrawl._load_failed_editorials():
+                            cfcrawl._remember_failed_editorial(cid)
+                            known = True
                 url = cfcrawl.read_editorial_url(cid)
                 if md and md.startswith("<!-- url:"):
                     # 剥离首行注释（纯 md 返回给前端）

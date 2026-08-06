@@ -399,6 +399,10 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     blog_html = fetch_url(link)
     if not blog_html:
         return None
+    # editorial 未发布时，contest 页 tutorial 链接指向公告博客 → 丢弃并标记（可重试）
+    if "Announcement of Codeforces Round" in blog_html:
+        _remember_failed_editorial(f"{cid}@announcement")
+        return None
     # 收集动态加载的 per-problem tutorial 占位
     codes = []
     if '<div class="problemTutorial"' in blog_html:
@@ -506,8 +510,10 @@ def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
                 fetched += 1
             else:
                 failed += 1
-                failed_set.add(str(cid))
-                _remember_failed_editorial(cid)  # 记忆失败，避免反复重试
+                if f"{cid}@announcement" not in failed_set:
+                    # 临时失败（公告/网络）不记 cid？——公告要重试；真失败才记
+                    failed_set.add(str(cid))
+                    _remember_failed_editorial(cid)  # 记忆失败，避免反复重试
             time.sleep(delay)  # 仅对真实爬取限速
         if on_progress:
             on_progress(i, total, cached, fetched, failed)
