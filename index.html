@@ -334,6 +334,17 @@
         display: inline-block;
         width: 72px; /* 固定宽度：中英链接文字位置稳定 */
       }
+      /* ═══ 本地解题代码复制按钮（与 srcdoc 样例框同逻辑）═══ */
+      .copy-wrap { position: relative; }
+      .copy-btn { position:absolute; top:6px; right:8px; z-index:5;
+        font:14px "CodeNewRoman Nerd Font", var(--sans); color:var(--accent);
+        background:transparent; border:1px solid transparent; border-radius:6px;
+        width:24px; height:24px; padding:0; line-height:24px; text-align:center;
+        cursor:pointer; opacity:0; transition:opacity .15s; user-select:none;
+        box-sizing:border-box; }
+      .copy-wrap:hover .copy-btn, .copy-btn:focus { opacity:1; }
+      .copy-btn:hover { color:var(--text); background:var(--surface2); border-color:var(--border); }
+      .copy-btn.ok { color:var(--teal); border-color:var(--border); }
       .name {
         max-width: 340px;
       }
@@ -1321,6 +1332,41 @@
         txt: "plaintext",
       };
       /* ═══ 解题代码渲染（题面底部追加；无文件则不渲染）═══ */
+      /* 复制按钮（与 srcdoc 样例框相同逻辑）：clipboard → execCommand 双轨兼容 */
+      function attachCopyButton(pre) {
+        const wrap = el("div", "copy-wrap");
+        pre.parentNode.insertBefore(wrap, pre);
+        wrap.appendChild(pre);
+        const btn = el("button", "copy-btn");
+        btn.textContent = "\uf0c5";
+        btn.title = "复制";
+        btn.onclick = () => {
+          const txt = pre.textContent;
+          const flash = (ok) => {
+            btn.textContent = ok ? "\uf00c" : "\uf0c5";
+            if (ok) btn.classList.add("ok");
+            setTimeout(() => { btn.textContent = "\uf0c5"; btn.classList.remove("ok"); }, 1500);
+          };
+          const fallback = () => {
+            const ta = document.createElement("textarea");
+            ta.value = txt;
+            ta.style.position = "fixed"; ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            let ok = false;
+            try { ok = document.execCommand("copy"); } catch (e) {}
+            document.body.removeChild(ta);
+            return ok;
+          };
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(txt).then(() => flash(true), () => flash(fallback()));
+          } else {
+            flash(fallback());
+          }
+        };
+        wrap.appendChild(btn);
+      }
+
       function renderSolutions(reader, seq) {
         fetch(
           `/api/solution?contestId=${currentProblem.contestId}&index=${currentProblem.index}`,
@@ -1353,6 +1399,7 @@
               code.textContent = f.content;
               pre.appendChild(code);
               reader.appendChild(pre);
+              attachCopyButton(pre); // 本地解题代码复用复制按钮逻辑
               // hljs 高亮（轻量本地，主题色联动）
               const langKey = (f.ext || "").replace(/^\./, ""); // .cpp → cpp
               code.className = "language-" + (langMap[langKey] || "plaintext");
