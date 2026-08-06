@@ -1720,6 +1720,8 @@ new MutationObserver(scheduleSync).observe(document.getElementById('md'), {
 document.querySelectorAll('img').forEach(function (im) {
   if (!im.complete) im.addEventListener('load', scheduleSync);
 });
+/* 窗口/iframe 尺寸变化（父页面 resize → iframe 内容重排，图片等比缩放）→ 同步高度 */
+window.addEventListener('resize', scheduleSync);
 /* 字体就绪（CodeNewRoman 加载后度量变化） */
 if (document.fonts) document.fonts.ready.then(scheduleSync);
 /* 折叠展开时仍需 typeset 公式（高度由 MutationObserver 自动同步） */

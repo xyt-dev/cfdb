@@ -6,6 +6,7 @@
 
 ### 修复
 
+- **iframe 高度动态同步**：浏览器 resize（宽屏→窄屏）时图片等比缩放、内容重排——srcdoc 补 `window resize` 监听自动防抖同步高度（此前高度停留在旧值，题面图片下文字与本地解题代码错位/被覆盖）
 - **默认主题改为 gruvbox**：`data-theme` 默认值 catppuccin → gruvbox（无 localStorage 记忆时生效；已记忆的主题保持用户选择；srcdoc 内联色值随之）
 
 
