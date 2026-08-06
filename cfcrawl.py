@@ -285,6 +285,12 @@ def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
             r'(\*\*[^*\n]*\b' + re.escape(letter) + r'\b[^*\n]*\*\*)\n+Tutorial is loading\.\.\.',
             re.S)
         m = pat2.search(md)
+    if not m:
+        # 2032 等格式：**Tutorial** 小节标题 + 占位
+        pat3 = re.compile(
+            r'(\*\*Tutorial\*\*)\n+Tutorial is loading\.\.\.',
+            re.S)
+        m = pat3.search(md)
     if m:
         return md[:m.start()] + m.group(1) + "\n\n" + tmd + md[m.end():]
     return md
