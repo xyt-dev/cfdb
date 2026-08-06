@@ -338,6 +338,7 @@ FOOTER_MARKS = [
     "Desktop version",
     "The only programming contests",
     "Supported by",
+    "Tutorial of",  # 博客标题噪音（每场末尾出现，后接投票区）
 ]
 
 

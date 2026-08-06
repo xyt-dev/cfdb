@@ -1117,6 +1117,7 @@
         frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
 body { background:transparent; color:${c.text}; margin:0; overflow:hidden;
+  padding-bottom:24px; /* 防最后一行字体下行被裁 */
   font:15.5px/1.9 ${serifStack}; }
 p { margin: 10px 0; }
 pre { background:${c.surface}; border:1px solid ${c.border}; border-radius:8px;
