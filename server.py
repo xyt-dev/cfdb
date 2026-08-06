@@ -66,11 +66,12 @@ def auto_update():
 
 
 def _valid_ref(cid: str, idx: str) -> bool:
-    """题号参数校验：contestId 为 1-6 位数字，index 为 1-3 位字母"""
-    return (
-        cid.isdigit() and 0 < len(cid) <= 6
-        and idx.isalpha() and 0 < len(idx) <= 3
-    )
+    """题号参数校验：contestId 为 1-6 位数字，index 为字母开头（可含数字，如 A1/B2/F1）"""
+    if not (cid.isdigit() and 0 < len(cid) <= 6):
+        return False
+    if not idx:
+        return False
+    return bool(idx[0].isalpha() and idx.isalnum() and 0 < len(idx) <= 3)
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -188,7 +189,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     print(f"cfdb 服务器启动: http://localhost:{PORT}", flush=True)
     try:
         import socket
