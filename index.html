@@ -1082,10 +1082,18 @@
       const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
       const sansStack = '"Noto Sans SC", "PingFang SC", sans-serif';
 
+      /* 保护公式内反斜杠：marked 会把 \\ 转义成 \（破坏 LaTeX 多行换行等），
+         公式段内 \ → &#92; 实体绕过 marked，MathJax 收到原始反斜杠 */
+      function protectMathBackslashes(md) {
+        return md.replace(/(\$\$?[^$]*?\$\$?)/g, function (m) {
+          return m.replace(/\\/g, "&#92;");
+        });
+      }
+
       function mdFrame(md) {
         let html;
         try {
-          html = window.marked ? marked.parse(md) : null;
+          html = window.marked ? marked.parse(protectMathBackslashes(md)) : null;
         } catch (e) {
           html = null;
         }
