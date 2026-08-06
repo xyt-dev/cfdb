@@ -41,18 +41,23 @@ def auto_update():
         r = subprocess.run([sys.executable, os.path.join(ROOT, "update.py")],
                            capture_output=True, timeout=300)
         out = (r.stdout + r.stderr).decode("utf-8", "replace").strip()
-        print(f"[auto-update] {'✅ 元数据已刷新' if r.returncode == 0 else '⚠️ 元数据更新失败'}")
+        ok = r.returncode == 0
+        print(f"[auto-update] {'✅ 元数据已刷新' if ok else '⚠️ 元数据更新失败'}")
         for line in out.splitlines()[-2:]:
             print(f"  {line}")
-
+        if not ok:
+            # 元数据失败（多为 CF 封禁/限流）→ 跳过爬取，避免继续触发反爬
+            print("[auto-update] ⏭️ 跳过题面/题解爬取（CF 可能拒绝访问，稍后重启再试）")
+            crawl_state["stage"] = "idle"
+            return
         crawl_state["stage"] = "statements"
         print("[auto-update] 增量爬取缺失题面...")
-        total, cached, fetched = cfcrawl.fetch_all_statements(delay=0.2, on_progress=_on_progress)
+        total, cached, fetched = cfcrawl.fetch_all_statements(delay=1.0, on_progress=_on_progress)
         print(f"[auto-update] ✅ 题面: 共 {total} | 已有 {cached} | 新爬 {fetched}")
 
         crawl_state["stage"] = "editorials"
         print("[auto-update] 增量爬取缺失题解...")
-        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=0.2, on_progress=_on_progress)
+        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=1.0, on_progress=_on_progress)
         print(f"[auto-update] ✅ 题解: 共 {total} 场比赛 | 已有 {cached} | 新爬 {fetched}")
 
         crawl_state["stage"] = "done"

@@ -24,6 +24,15 @@ def fetch() -> bytes:
                  API_URL],
                 capture_output=True, timeout=150)
             if r.returncode == 0 and r.stdout:
+                head = r.stdout[:256].lstrip()
+                if head.startswith(b"<") or b"403 Forbidden" in head:
+                    # CF 反爬：IP 被封禁/限流——重试无意义，立即退出（保留旧数据）
+                    print(
+                        "❌ CF 拒绝访问（403，IP 可能被临时封禁/限流）。"
+                        "本地数据不受影响；请稍后（数小时）再试。",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
                 return r.stdout
         except Exception:
             pass
