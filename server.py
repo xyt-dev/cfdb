@@ -164,8 +164,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not (cid.isdigit() and 0 < len(cid) <= 6):
                 self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
             else:
-                known = str(cid) in cfcrawl._load_failed_editorials()
                 md = cfcrawl.read_editorial_md(cid)
+                if not md and str(cid) in cfcrawl._load_failed_editorials():
+                    # 已确认无 Editorial → 立即返回，不再请求 CF（秒回）
+                    self._send(200, json.dumps({"md": None, "url": None, "known": True}).encode(), "application/json")
+                    return
+                known = False
                 if not md:
                     md = cfcrawl.fetch_editorial_md(cid)
                     if not md:
