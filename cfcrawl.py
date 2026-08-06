@@ -125,8 +125,8 @@ def read_statement_md(cid, idx) -> str | None:
     """纯读本地题面 md（未预爬返回 None）——server 端用"""
     path = statement_path(cid, idx)
     try:
-        if os.path.getsize(path) <= 200:
-            return None  # 空壳（爬取异常产物）：视为未爬
+        if os.path.getsize(path) <= 50:
+            return None  # 空壳（爬取异常产物，1 字节 \n）：视为未爬
         with open(path, encoding="utf-8") as f:
             return f.read()
     except OSError:
@@ -541,8 +541,9 @@ def fetch_all_statements(delay: float = 1.5, dry: bool = False,
     for p in problems:
         key = f"{p["contestId"]}{p["index"]}"
         sp = statement_path(p["contestId"], p["index"])
-        # 空壳文件（<=200B，爬取异常产物）视为未爬——下次自动补
-        if key in failed_set or (os.path.isfile(sp) and os.path.getsize(sp) > 200):
+        # 空壳文件（<=50B 爬取异常产物，如 1 字节 \n）视为未爬——下次自动补
+        # （阈值与写前保护一致：短题面如愚人节题 151B 是正常内容，不误判）
+        if key in failed_set or (os.path.isfile(sp) and os.path.getsize(sp) > 50):
             cached += 1  # 已预爬或已知失败：秒跳过
         else:
             todo.append(p)

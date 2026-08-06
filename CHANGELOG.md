@@ -6,6 +6,7 @@
 
 ### 修复
 
+- **空壳阈值修正（200→50）**：短题面（愚人节题等 51-200B 正常内容）被误判为空壳 → 阈值与写前保护一致（≤50B 才算爬取异常产物）；1331A 等 6 个短题面恢复显示
 - **滚动条主题化**：filter 标签区/代码框/页面滚动条统一 WebKit 样式（surface2 thumb + 透明 track），Firefox 用原生 `scrollbar-color`；修复 Chrome 中 thumb `border` 渲染成一圈黑色轮廓（去 border）
 - **数字输入框去增减按钮**：filter 栏 Rating/解题数输入框的 spin button 隐藏（WebKit `appearance:none` + Firefox `appearance:textfield`）
 - **返回按钮箭头居中**：Chrome 中 `←` 字体字形基线偏移（Firefox 正常）→ 改用 **SVG 箭头**（几何渲染零字体依赖）+ i18n 文本去箭头（避免双箭头）
