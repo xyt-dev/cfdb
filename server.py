@@ -93,34 +93,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/html; charset=utf-8")
             except OSError:
                 self._send(404, b"not found", "text/plain")
-        elif u.path.startswith("/npm/"):
-            # shiki 本地化依赖树（node_modules）
-            rel = u.path[len("/npm/"):]
-            npm_path = os.path.join(ROOT, "node_modules", rel)
-            try:
-                with open(npm_path, "rb") as f:
-                    ctype = "application/javascript" if npm_path.endswith((".mjs", ".js")) else "application/octet-stream"
-                    self._send(200, f.read(), ctype)
-            except OSError:
-                self._send(404, b"not found", "text/plain")
-        elif u.path.startswith("/eimages/"):
-            # 题解图片（editorials/images/）
-            rel = u.path[len("/eimages/"):]
-            img_path = os.path.join(cfcrawl.EDITORIAL_IMAGE_DIR, os.path.basename(rel))
-            try:
-                with open(img_path, "rb") as f:
-                    self._send(200, f.read(), "image/png")
-            except OSError:
-                self._send(404, b"not found", "text/plain")
-        elif u.path.startswith("/images/"):
-            # 题面图片（statements/images/）
-            rel = u.path[len("/images/"):]
-            img_path = os.path.join(cfcrawl.IMAGE_DIR, os.path.basename(rel))
-            try:
-                with open(img_path, "rb") as f:
-                    self._send(200, f.read(), "image/png")
-            except OSError:
-                self._send(404, b"not found", "text/plain")
         elif u.path.startswith("/vendor/"):
             # 本地静态资源（marked 等）
             name = os.path.basename(u.path)

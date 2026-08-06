@@ -6,21 +6,6 @@
     <title>CF Database — Codeforces 题目库</title>
     <script src="/vendor/marked.min.js"></script>
     <script src="/vendor/highlight.min.js"></script>
-    <!-- shiki 本地化：importmap 映射 npm 依赖树（零 CDN） -->
-    <script type="importmap">
-      {
-        "imports": {
-          "shiki/bundle/full": "/npm/shiki/dist/bundle-full.mjs",
-          "@shikijs/core": "/npm/@shikijs/core/dist/index.mjs",
-          "@shikijs/engine-oniguruma": "/npm/@shikijs/engine-oniguruma/dist/index.mjs",
-          "@shikijs/engine-javascript": "/npm/@shikijs/engine-javascript/dist/index.mjs",
-          "@shikijs/types": "/npm/@shikijs/types/dist/index.mjs",
-          "@shikijs/vscode-textmate": "/npm/@shikijs/vscode-textmate/dist/index.js",
-          "@shikijs/langs/": "/npm/@shikijs/langs/dist/",
-          "@shikijs/themes/": "/npm/@shikijs/themes/dist/"
-        }
-      }
-    </script>
     <style>
       :root {
         --radius: 10px;
@@ -926,65 +911,13 @@
           });
       }
 
-      /* ═══ shiki 高亮（TextMate 语法引擎，CSS 变量主题联动）═══ */
+      /* ═══ hljs 高亮（轻量本地，语言映射 + 主题色联动）═══ */
       const langMap = {
         rs: "rust", cpp: "cpp", cc: "cpp", cxx: "cpp", c: "c",
         py: "python", java: "java", go: "go", ts: "typescript",
         js: "javascript", kt: "kotlin", cs: "csharp", sh: "bash",
         txt: "plaintext",
       };
-      const SHIKI_THEME = {
-        name: "cfdb",
-        type: "dark",
-        colors: { "editor.background": "transparent" },
-        tokenColors: [
-          { scope: [],
-            settings: { foreground: "var(--text)" } },
-          { scope: ["keyword", "storage.type", "storage.modifier"],
-            settings: { foreground: "var(--accent2)" } },
-          { scope: ["string", "string.regexp"],
-            settings: { foreground: "var(--teal)" } },
-          { scope: ["comment"],
-            settings: { foreground: "var(--subtext)", fontStyle: "italic" } },
-          { scope: ["entity.name.function", "support.function"],
-            settings: { foreground: "var(--accent)" } },
-          { scope: ["constant.numeric", "constant"],
-            settings: { foreground: "var(--r2400)" } },
-          { scope: ["entity.name.type", "support.type"],
-            settings: { foreground: "var(--r1900)" } },
-          { scope: ["meta", "keyword.other"],
-            settings: { foreground: "var(--r2100)" } },
-        ],
-      };
-      let shikiModule = null;
-      async function highlightShiki(pre, code, lang) {
-        try {
-          if (!shikiModule) {
-            // 本地 shiki（importmap → /npm/ 依赖树），失败回退本地 hljs
-            shikiModule = import("shiki/bundle/full");
-          }
-          const { codeToHtml } = await shikiModule;
-          const html = await codeToHtml(code.textContent, {
-            lang: lang,
-            theme: SHIKI_THEME,
-          });
-          const parsed = new DOMParser().parseFromString(html, "text/html");
-          const node = parsed.body.firstElementChild;
-          if (node) pre.replaceWith(node); // 替换为高亮后的 <pre>
-          return; // shiki 成功
-        } catch (e) {
-          // 回退：本地 hljs（零网络依赖）
-          try {
-            if (window.hljs) {
-              code.className = "language-" + lang;
-              hljs.highlightElement(code);
-            }
-          } catch (e2) {
-            /* 保持纯文本 */
-          }
-        }
-      }
-
       /* ═══ 解题代码渲染（题面底部追加；无文件则不渲染）═══ */
       function renderSolutions(reader) {
         fetch(
@@ -1017,8 +950,12 @@
               code.textContent = f.content;
               pre.appendChild(code);
               reader.appendChild(pre);
+              // hljs 高亮（轻量本地，主题色联动）
               const langKey = (f.ext || "").replace(/^\./, ""); // .cpp → cpp
-              highlightShiki(pre, code, langMap[langKey] || "plaintext");
+              code.className = "language-" + (langMap[langKey] || "plaintext");
+              try {
+                if (window.hljs) hljs.highlightElement(code);
+              } catch (e) {}
             });
           })
           .catch((err) => {
@@ -1101,7 +1038,7 @@ li { margin: 4px 0; }
 blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px; color:#889; }
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]}};<\/script>
-<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async><\/script>
+<script src="/vendor/tex-svg.js" async><\/script>
 </head><body><div id="md">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
