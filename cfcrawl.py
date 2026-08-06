@@ -396,6 +396,10 @@ def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
         m = pat3.search(md)
     if m:
         return md[:m.start()] + m.group(1) + "\n\n" + tmd + md[m.end():]
+    # fallback：无粗体标题的博客（如 1300——占位前没有标题行）→ 直接替换占位符
+    # （按 codes 顺序逐个替换，页面顺序与 codes 一致）
+    if "Tutorial is loading" in md:
+        return md.replace("Tutorial is loading...", tmd, 1)
     return md
 
 
@@ -431,10 +435,6 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     if '<div class="problemTutorial"' in blog_html:
         codes = re.findall(r'problemcode="([^"]+)"', blog_html)
     md = html2md.editorial_to_md(blog_html)
-    # 写前校验：转换结果过短（错误页产物）视为失败，不写文件
-    if not md or len(md.strip()) < 100 or "403 Forbidden" in md:
-        _remember_failed_editorial(f"{cid}@temp")
-        return None
     # md 层替换占位符为真实题解（避免 HTML 层 ttypography 嵌套截断）
     if codes and "Tutorial is loading" in md:
         tutorials = _fetch_problem_tutorials(cid, codes)
@@ -443,6 +443,11 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
             md = _replace_tutorial(md, idx, tmd)
             if "Tutorial is loading" not in md:
                 break
+    # 写前校验：错误页/占位残留/过短 = 假题解，不写文件（@temp 可重试）
+    if not md or len(md.strip()) < 100 or "403 Forbidden" in md \
+            or "nginx/" in md or "Tutorial is loading" in md:
+        _remember_failed_editorial(f"{cid}@temp")
+        return None
     if not md.strip():
         return None
     md = _embed_images(md, f"{cid}", EDITORIAL_IMAGE_DIR, "eimages")  # 下载题解图片
@@ -471,61 +476,103 @@ def _load_failed() -> set:
 
 
 def _save_failed(failed: set):
-    try:
-        with open(FAILED_FILE, "w", encoding="utf-8") as f:
-            json.dump(sorted(failed), f)
-    except OSError:
-        pass
+    with _failed_lock:  # 并发写保护
+        try:
+            with open(FAILED_FILE, "w", encoding="utf-8") as f:
+                json.dump(sorted(failed), f)
+        except OSError:
+            pass
 
 
-def fetch_all_statements(delay: float = 0.4, dry: bool = False,
+def _run_batch_crawler(todo, fetch_fn, on_fail, delay: float = 1.5,
+                        on_progress=None, label: str = "") -> tuple[int, int]:
+    """通用分批并发爬取：题面/题解共用。
+    todo: 待爬项列表（已爬/已记忆的由调用方排除）
+    fetch_fn(item): 单项目爬取，返回内容或 None
+    on_fail(item): 失败处理（失败记忆等）
+    403 自适应：整批失败自动暂停（下次启动续跑）；批间限速防封禁"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    BATCH = 8
+    done = 0
+    fetched = 0
+    failed = 0
+    total = len(todo)
+    idx = 0
+    while idx < len(todo):
+        batch = todo[idx:idx + BATCH]
+        idx += BATCH
+        results = {}
+        with ThreadPoolExecutor(max_workers=BATCH) as ex:
+            futs = {ex.submit(fetch_fn, item): item for item in batch}
+            for f in as_completed(futs):
+                item = futs[f]
+                try:
+                    results[id(item)] = f.result()
+                except Exception:
+                    results[id(item)] = None
+        failed_this = 0
+        for item in batch:
+            done += 1
+            if results.get(id(item)):
+                fetched += 1
+            else:
+                failed += 1
+                failed_this += 1
+                on_fail(item)
+        if on_progress:
+            on_progress(done, total, fetched, failed)
+        # 403 自适应：整批失败 → 暂停（网络异常，避免无谓重试与封禁升级）
+        if failed_this == len(batch) and len(batch) == BATCH:
+            print(f"  ⚠️ 网络异常（CF 可能限流/封禁）——暂停{label}，下次启动续跑")
+            break
+        time.sleep(delay)  # 批间限速
+    return fetched, failed
+
+
+def fetch_all_statements(delay: float = 1.5, dry: bool = False,
                          on_progress=None) -> tuple[int, int, int]:
     """遍历 problems.json 预爬所有题面。返回 (总数, 命中缓存, 新爬)
-    on_progress(i, total, cached, fetched, failed) 可选进度回调"""
+    已爬/已知失败秒跳过；未爬的复用通用并发框架（8 并发 + 403 自适应 + 限速）"""
     problems = _load_problems()
     total = len(problems)
     cached = 0
-    fetched = 0
-    failed = 0
     failed_set = _load_failed()
-    for i, p in enumerate(problems, 1):
+    todo = []
+    for p in problems:
         key = f"{p["contestId"]}{p["index"]}"
         sp = statement_path(p["contestId"], p["index"])
         # 空壳文件（<=200B，爬取异常产物）视为未爬——下次自动补
         if key in failed_set or (os.path.isfile(sp) and os.path.getsize(sp) > 200):
-            # 已预爬或已知失败：秒跳过（不 sleep）
-            cached += 1
-            if on_progress:
-                on_progress(i, total, cached, fetched, failed)
-            continue
-        if not dry:
-            md = fetch_statement_md(p["contestId"], p["index"], retries=1, timeout=15)
-            if md:
-                fetched += 1
-            else:
-                failed += 1
-                failed_set.add(key)
-                _save_failed(failed_set)  # 记忆失败，避免反复重试
-            time.sleep(delay)  # 仅对真实爬取限速
+            cached += 1  # 已预爬或已知失败：秒跳过
+        else:
+            todo.append(p)
+
+    def fetch_one(p):
+        return fetch_statement_md(p["contestId"], p["index"], 1, 12)
+
+    def on_fail(p):
+        key = f"{p["contestId"]}{p["index"]}"
+        failed_set.add(key)
+        _save_failed(failed_set)  # 记忆失败，避免反复重试
+
+    def prog(done, n, fetched, failed):
         if on_progress:
-            on_progress(i, total, cached, fetched, failed)
-        if (i % 20 == 0 or i == total) and not on_progress:
-            print(f"  题面 [{i}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed}")
+            on_progress(cached + done, total, cached, fetched, failed)
+
+    if on_progress:
+        on_progress(cached, total, cached, 0, 0)
+    fetched, _ = _run_batch_crawler(todo, fetch_one, on_fail, delay, prog, "题面")
     return total, cached, fetched
 
 
 def fetch_all_editorials(delay: float = 1.5, dry: bool = False,
                           on_progress=None) -> tuple[int, int, int]:
     """遍历所有比赛预爬题解。返回 (比赛数, 命中缓存, 新爬)
-    已爬/已确认无题解的比赛秒跳过；未确认的按批并发探测（默认 4 并发，
-    批间 delay 限速防封禁；批量内出现网络异常则暂停，下次启动续跑）"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    已爬/已确认无题解秒跳过；未确认的复用通用并发框架（8 并发 + 403 自适应 + 限速）"""
     problems = _load_problems()
     contests = sorted({p["contestId"] for p in problems})
     total = len(contests)
     cached = 0
-    fetched = 0
-    failed = 0
     failed_set = _load_failed_editorials()
     todo = []
     for cid in contests:
@@ -533,46 +580,24 @@ def fetch_all_editorials(delay: float = 1.5, dry: bool = False,
             cached += 1  # 已爬 或 已确认无：秒跳过
         else:
             todo.append(cid)
-    if on_progress:
-        on_progress(cached, total, cached, fetched, failed)
-    BATCH = 8
-    done = cached
-    idx = 0
-    while idx < len(todo):
-        batch = todo[idx:idx + BATCH]
-        idx += BATCH
-        # 批内并发探测
-        results = {}
-        with ThreadPoolExecutor(max_workers=BATCH) as ex:
-            futs = {ex.submit(fetch_editorial_md, c, 1, 12): c for c in batch}
-            for f in as_completed(futs):
-                c = futs[f]
-                try:
-                    results[c] = f.result()
-                except Exception:
-                    results[c] = None
-        blocked = 0
-        for c in batch:
-            done += 1
-            md = results.get(c)
-            if md:
-                fetched += 1
-            else:
-                failed += 1
-                if f"{c}@temp" in failed_set:
-                    blocked += 1  # 网络失败/被拦：不记 cid（下次重试）
-                elif f"{c}@announcement" not in failed_set:
-                    failed_set.add(str(c))
-                    _remember_failed_editorial(c)  # 确认无题解：记忆
+
+    def fetch_one(c):
+        return fetch_editorial_md(c, 1, 12)
+
+    def on_fail(c):
+        if f"{c}@temp" in failed_set:
+            return  # 网络失败/被拦：不记 cid（下次启动重试）
+        if f"{c}@announcement" not in failed_set:
+            failed_set.add(str(c))
+            _remember_failed_editorial(c)  # 确认无题解：记忆，避免反复重试
+
+    def prog(done, n, fetched, failed):
         if on_progress:
-            on_progress(done, total, cached, fetched, failed)
-        elif idx % 100 == 0 or idx >= len(todo):
-            print(f"  题解 [{done}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed}")
-        # 403 自适应：整批网络异常 → 暂停（避免无谓请求与封禁升级）
-        if blocked == len(batch) and len(batch) == BATCH:
-            print("  ⚠️ 网络异常（CF 可能限流/封禁）——暂停探测，下次启动续跑")
-            break
-        time.sleep(delay)  # 批间限速（4 并发 × 批间 = ~2.7 req/s）
+            on_progress(cached + done, total, cached, fetched, failed)
+
+    if on_progress:
+        on_progress(cached, total, cached, 0, 0)
+    fetched, _ = _run_batch_crawler(todo, fetch_one, on_fail, delay, prog, "题解")
     return total, cached, fetched
 
 
