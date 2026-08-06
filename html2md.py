@@ -29,6 +29,43 @@ class Html2Md(HTMLParser):
         self._prop_depth = 0
         self._is_prop_value = False
 
+def _detect_code_lang(code: str) -> str:
+    """启发式检测代码语言（CF 题解常见语言）——裸代码块输出语言标注"""
+    c = code[:400]
+    if re.search(r"#include\s*[<\"]", c) or re.search(r"\b(?:cin|cout|endl|std::|vector<|using namespace)\b", c):
+        return "cpp"
+    if re.search(r"\b(?:printf|scanf)\s*\(", c) and "#include" in c:
+        return "c"
+    if re.search(r"\bfn\s+\w+\s*\(", c) and re.search(r"\b(?:let\s+mut|println!|use \w+::)", c):
+        return "rust"
+    if re.search(r"\bfun\s+\w+\s*\(", c):
+        return "kotlin"
+    if re.search(r"\bfunc\s+\w+\s*\(", c) or re.search(r"\bpackage main\b", c):
+        return "go"
+    if re.search(r"\bpublic\s+(?:static\s+)?class\b", c) or "System.out" in c:
+        return "java"
+    if re.search(r"\bdef\s+\w+\s*\(", c) or re.search(r"\bprint\s*\(", c):
+        return "python"
+    if re.search(r"\b(?:function|const|let|var)\s+\w+", c) and "=>" in c:
+        return "javascript"
+    # 弱特征：代码片段（无 include 等强特征，但语法特征明显）
+    if re.search(r"\b(?:long long|vector<|push_back|1ll\b|for \(int \w+\s*=|int main\s*\()", c):
+        return "cpp"
+    # C 风格括号块（if/for/while + {），排除已识别的其他语言
+    if re.search(r"\)\s*\{", c) and not re.search(
+        r"\b(?:def |print\s*\(|fn \w+\s*\(|func \w+\s*\()", c):
+        return "cpp"
+    if re.search(r"\b(?:for \w+ in |range\s*\(|import \w+)", c):
+        return "python"
+    if re.search(r"\b(?:let mut|println!|fn \w+\s*\()", c):
+        return "rust"
+    if re.search(r"\b(?:fmt\.|package main|func \w+\s*\()", c):
+        return "go"
+    if re.search(r"\b(?:System\.out|public class)", c):
+        return "java"
+    return ""
+
+
     # ── 辅助 ──
     def _nl(self):
         """块级换行：先清理行尾空格"""
@@ -40,7 +77,9 @@ class Html2Md(HTMLParser):
     def _flush_pre(self):
         if self.pre_buf:
             code = "".join(self.pre_buf).strip("\n")
-            self.out.append("```\n" + code + "\n```\n")
+            lang = _detect_code_lang(code)
+            self._nl()  # 确保围栏在行首（清理前段尾空格）
+            self.out.append(f"```{lang}\n" + code + "\n```\n")
             self.pre_buf = []
 
     def _push_line(self, text):

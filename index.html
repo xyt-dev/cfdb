@@ -1017,7 +1017,8 @@
               code.textContent = f.content;
               pre.appendChild(code);
               reader.appendChild(pre);
-              highlightShiki(pre, code, langMap[f.ext] || "plaintext");
+              const langKey = (f.ext || "").replace(/^\./, ""); // .cpp → cpp
+              highlightShiki(pre, code, langMap[langKey] || "plaintext");
             });
           })
           .catch((err) => {
@@ -1038,6 +1039,12 @@
           text: pick("--text"),
           accent: pick("--accent"),
           border: pick("--border"),
+          accent2: pick("--accent2"),
+          teal: pick("--teal"),
+          subtext: pick("--subtext"),
+          r2400: pick("--r2400"),
+          r1900: pick("--r1900"),
+          r2100: pick("--r2100"),
         };
       }
       const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
@@ -1078,6 +1085,17 @@ h2 { font-size:17px; color:${c.accent}; margin:22px 0 8px; font-family:${sansSta
 h3 { font-size:15.5px; margin:18px 0 6px; }
 a { color:${c.accent}; }
 hr { border:none; border-top:1px solid ${c.border}; margin:18px 0; }
+/* ═══ 代码高亮配色（内联当前主题色值）═══ */
+.hljs { background:transparent; color:${c.text}; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal { color:${c.accent2}; }
+.hljs-string, .hljs-regexp, .hljs-addition { color:${c.teal}; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color:${c.r2400}; }
+.hljs-comment, .hljs-quote { color:${c.subtext}; font-style:italic; }
+.hljs-title, .hljs-function, .hljs-section { color:${c.accent}; }
+.hljs-type, .hljs-built_in, .hljs-attr, .hljs-variable { color:${c.r1900}; }
+.hljs-meta, .hljs-selector-class, .hljs-selector-id { color:${c.r2100}; }
+.hljs-params { color:${c.text}; }
+.hljs-deletion { color:${c.accent2}; }
 ul,ol { padding-left: 24px; margin: 8px 0; }
 li { margin: 4px 0; }
 blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px; color:#889; }
@@ -1085,13 +1103,23 @@ blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px;
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]}};<\/script>
 <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async><\/script>
 </head><body><div id="md">${html}</div>
+<script src="/vendor/highlight.min.js"><\/script>
 <script>
+/* 代码块语法高亮：仅带语言标注的高亮；裸代码块（样例等）保持纯文本 */
+document.querySelectorAll('pre code').forEach(function(el){
+  try {
+    if (el.className && el.className.indexOf('language-') === 0) {
+      hljs.highlightElement(el);
+    }
+  } catch(e) {}
+});
 /* 所有链接强制新标签打开（防止 iframe 内导航渲染） */
 document.addEventListener('click', function(e){
   var a = e.target.closest('a');
   if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
 });
 function syncH(){parent.postMessage({cfdbH:document.body.scrollHeight},'*')}
+syncH();
 if(window.MathJax){MathJax.typesetPromise().then(syncH).catch(syncH)}else{syncH()}
 setTimeout(syncH, 800);setTimeout(syncH, 3000);
 <\/script>
