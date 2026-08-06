@@ -1716,6 +1716,13 @@ document.querySelectorAll('#md > p').forEach(function(p){
    遇小节标题开启 details，收集后续兄弟节点，遇下一小节标题/分割线/标题收束 */
 (function () {
   var KEYS = /^(Hint|Solution|Tutorial|Code|Feedback|Approach|Proof|Observation|Note|Complexity|Implementation|Explanation|Idea|Alternative|Official)/i;
+  // 题号标题识别（下一题边界——与前端 normalizeProblemHeaders 同款规则）
+  function isProblemTitleText(t) {
+    t = (t || '').trim();
+    if (/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S/.test(t)) return true;
+    if (/^[A-Z]\d[A-Z]?\d?\s+\S/.test(t)) return true;
+    return false;
+  }
   var root = document.getElementById('md');
   var kids = Array.prototype.slice.call(root.children);
   var open = null;
@@ -1740,6 +1747,14 @@ document.querySelectorAll('#md > p').forEach(function(p){
     var strong = null;
     if (el.tagName === 'P' && el.children.length === 1 && el.children[0].tagName === 'STRONG') {
       strong = el.children[0].textContent.trim();
+    }
+    // 下一题题号标题（未 wrap 的 **B. xxx** 等格式）：折叠收束边界
+    // 否则下一题的描述会被收进上一题的 Solution 折叠块
+    var txt = el.textContent.trim();
+    if (txt && txt.length < 60 && isProblemTitleText(txt)) {
+      if (open) flush();
+      open = null;
+      return;
     }
     if (strong && strong.length <= 50 && KEYS.test(strong)) {
       if (open) flush();

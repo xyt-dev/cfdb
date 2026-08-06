@@ -29,6 +29,7 @@ class Html2Md(HTMLParser):
         self._prop_depth = 0
         self._is_prop_value = False
         self._bold_pending = 0   # <b> 延迟输出计数（空粗体 <b><br/></b> 不产生 **）
+        self._b_skip = False      # spoiler-title 粗体（Editorial 折叠标题——跳过，题号标题已表示题解）
         self._a_href = ""        # <a> 链接（markdown 链接输出）
 
     # ── 辅助 ──
@@ -122,7 +123,10 @@ class Html2Md(HTMLParser):
                 self._nl()
                 self.out.append("  " * (self.li_level - 1) + "- ")
             elif tag.startswith("h") and len(tag) == 2 and tag[1].isdigit():
-                level = int(tag[1])
+                try:
+                    level = int(tag[1])
+                except ValueError:
+                    level = 1
                 self._nl()
                 self.out.append("#" * level + " ")
             else:
@@ -151,6 +155,7 @@ class Html2Md(HTMLParser):
         # 行内格式：粗体延迟输出（等有内容再 flush；空粗体直接丢弃）
         if tag == "b" or tag == "strong":
             self._bold_pending += 1
+            self._b_skip = "spoiler-title" in cls
             return
         elif tag == "i" or tag == "em":
             self.out.append("*")
@@ -216,6 +221,7 @@ class Html2Md(HTMLParser):
                 self.out.append(f"](<{href}>)")
             return
         if tag in ("b", "strong"):
+            self._b_skip = False
             if self._bold_pending > 0:
                 self._bold_pending -= 1  # 无内容即闭合：空粗体丢弃
             else:
@@ -242,6 +248,11 @@ class Html2Md(HTMLParser):
         # 保留所有文本节点（含纯空格节点）——跨标签的空格不能丢，否则文字连在一起
         if data:
             if self._bold_pending:
+                if self._b_skip and data.strip().lower() == "editorial":
+                    # 跳过 Editorial 折叠标题（CF 每题一个 spoiler-title——本地冗余）
+                    self._bold_pending = 0
+                    self._b_skip = False
+                    return
                 self.out.append("**" * self._bold_pending)
                 self._bold_pending = 0
             self.out.append(data)
@@ -290,6 +301,24 @@ def _detect_code_lang(code: str) -> str:
 
 
 
+def _dedupe_problem_headers(md: str) -> str:
+    """全局去重题号标题：同一题号的 h2 只保留第一个（无论来源——原文 <p><a>/
+    tmd 补全/粗体/链接/h1-h4——转换管线末尾兜底）。内容不丢，只删重复标题行。
+    这是根本层：不依赖替换路径（_replace_tutorial 的去重是替换时判断，
+    覆盖不了"原文点号格式 + tmd 连字符"等未知组合）。"""
+    seen = set()
+    out = []
+    for line in md.split("\n"):
+        m = re.match(r'^## ([A-Z]?\d{1,4}[A-Z]?)\s*[-—–]\s*\S', line)
+        if m:
+            key = m.group(1)
+            if key in seen:
+                continue  # 重复标题行——删（内容保留）
+            seen.add(key)
+        out.append(line)
+    return "\n".join(out)
+
+
 def _normalize_math(md: str) -> str:
     """CF 用 $$$ 包裹公式，MathJax 会把 $$$x$$$ 误解析成 $$ + $x（渲染出前导 $）。
     统一转为单 $ 内联公式：$$$x$$$ → $x$"""
@@ -306,6 +335,44 @@ def problem_statement_to_md(html_text: str) -> str:
     md = _normalize_math(_clean(p.out))
     # 样例标记（.title 误转的 # Input / # Output）降级为 h4——题目名称才是唯一 h1
     md = re.sub(r"^# (Input|Output)\s*$", r"#### \1", md, flags=re.M)
+    return md
+
+
+def _normalize_problem_headers(md: str) -> str:
+    """题解中的题号标题（[1000B - Name](<url>) / 1000B - Name / **1000B - Name**）
+    统一转换为 `## 题号 - 名称`（h2）——原题链接由前端 wrap 提供"""
+    # 链接格式: [1000B - Light It Up](<https://...>)
+    # 整行处理：一行多链接（如 1190A/1191C 双入口）各自转 h2
+    def _links_to_h2(m):
+        parts = re.findall(
+            r'\[([A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*[^\]]+)\]\(<[^>]+>\)', m.group(0))
+        return "\n".join("## " + p for p in parts)
+    md = re.sub(
+        r'^\[[A-Z]?\d{1,4}[A-Z]?\s*[-—–][^\n]*$',
+        _links_to_h2, md, flags=re.M)
+    # 粗体格式: **1000B - Name**（整行）
+    md = re.sub(
+        r'^\*\*([A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S[^*\n]*?)\*\*\s*$',
+        r'## \1', md, flags=re.M)
+    # 裸文本格式: 1000B - Name（整行短行）
+    md = re.sub(
+        r'^([A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S[^\n]{0,50})$',
+        r'## \1', md, flags=re.M)
+    # 点号格式（旧博客）: 1000B. Light It Up（3+ 位数字 + 可选字母 + 点号 + 大写开头——
+    # 防 "1) Sum" 列表/正文编号误判；转换后统一连字符 h2，前端同一套识别）
+    def _dot_to_h2(m):
+        t = re.sub(r'^(\d{3,4}[A-Z]?)\.\s+', r'\1 - ', m.group(1))
+        return '## ' + t
+    md = re.sub(
+        r'^(\d{3,4}[A-Z]?\.\s+[A-Z][^\n]{0,50})$',
+        _dot_to_h2, md, flags=re.M)
+    # 标题格式（h1-h4）: ### 1004E - Name / #### 2044A - Name / ### [1004E - Name](<url>)
+    md = re.sub(
+        r'^#{1,4} \[([A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*[^\]]+)\]\(<[^>]+>\)\s*$',
+        r'## \1', md, flags=re.M)
+    md = re.sub(
+        r'^#{1,4} ([A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S[^\n]{0,50})$',
+        r'## \1', md, flags=re.M)
     return md
 
 
@@ -374,6 +441,8 @@ def editorial_to_md(html_text: str) -> str:
     md = _normalize_math(_clean(p.out))
     # 过滤 Feedback 投票小节（CF 标准 6 选项组件，无价值）
     md = _FEEDBACK_RE.sub("", md)
+    # 题号标题统一转 h2（下一题边界正确——Solution 折叠不吞下一题描述）
+    md = _normalize_problem_headers(md)
     return md
 
 

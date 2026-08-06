@@ -363,12 +363,13 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
             d = json.loads(r.stdout)
             if d.get("success") in (True, "true") and d.get("html"):
                 tmd = html2md.editorial_to_md(d["html"])
-                # 去掉自带标题行（占位标题已存在）
-                lines = tmd.split("\n")
-                if lines and lines[0].startswith("#"):
-                    tmd = "\n".join(lines[1:]).strip()
-                if tmd:
-                    out[code] = tmd
+                # 保留/补全题号标题：API html 的 <h3>标题</h3> 在 ttypography 外
+                # （editorial_to_md 提取 ttypography 时被丢弃）→ 从 h3 提取补上
+                if tmd.strip():
+                    tm = re.search(r'<h3>.*?>([^<]+)</a>', d["html"])
+                    if tm:
+                        tmd = f"## {tm.group(1)}\n\n" + tmd.strip()
+                    out[code] = tmd.strip()
         except Exception:
             pass
         time.sleep(0.3)  # 限速防反爬
@@ -378,6 +379,15 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
 def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
     """把该题的 'Tutorial is loading...' 占位替换为真实题解。
     精确匹配题号（如 A1）；失败则用首字母 fallback（如 problemCode=F3 但标题是 F）"""
+    # 去重：博客原文已有同题号标题（<p><a>1000A - Name</a></p> 转的 h2）时，
+    # tmd 自带的题号标题（h3 补全）会造成双标题（如 1000：原文标题 + tmd 标题）。
+    # 纯占位博客（1004 等无原文标题）保留 tmd 标题。
+    m = re.match(r'^## ([A-Z]?\d{1,4}[A-Z]?)\s*[-—–].*', tmd)
+    if m and re.search(r'^## ' + re.escape(m.group(1)) + r'\b', md, re.M):
+        rest = tmd.split('\n', 1)
+        tmd = rest[1].strip() if len(rest) > 1 else ''
+        if not tmd:
+            return md
     pat = re.compile(
         r'(\*\*[^*\n]*' + re.escape(idx) + r'[^*\n]*\*\*)\n+Tutorial is loading\.\.\.',
         re.S)
@@ -443,6 +453,8 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
             md = _replace_tutorial(md, idx, tmd)
             if "Tutorial is loading" not in md:
                 break
+    # 全局去重题号标题（根本层兜底——原文标题 + tmd 标题重复只留第一个）
+    md = html2md._dedupe_problem_headers(md)
     # 写前校验：错误页/占位残留/过短 = 假题解，不写文件（@temp 可重试）
     if not md or len(md.strip()) < 100 or "403 Forbidden" in md \
             or "nginx/" in md or "Tutorial is loading" in md:

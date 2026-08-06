@@ -9,6 +9,12 @@
 - **favicon 与标题 CF 图标**：标签页 favicon 使用本地 CF 图标（`vendor/cf-favicon.png`，零 CDN）；页面顶部标题（h1）前加 CF 图标 22×22
 - **`/vendor/` 图片 content-type**：png/jpg/gif/svg/webp 正确返回（此前 octet-stream 导致 favicon 不显示）
 
+### 修复
+
+- **题号标题链路（根本解决）**：① API 动态 tutorial 的 `<h3>题号标题</h3>` 在 ttypography 容器外被转换器丢弃（1004E 等纯占位博客整场无题号标题）→ 补全时从 API html 提取补 `## 题号 - 名称`；② 博客原文标题与补全标题双份（1000 类每题标题重复 + 每题第一个总是 Editorial）→ 替换时去重 + 转换管线末尾**全局去重**兜底（同题号 h2 只留第一个，内容不丢）；③ CF 原文 `spoiler-title` 的 `**Editorial**` 折叠标题（题号标题后第一个元素总是 Editorial）→ 转换时跳过（Solution 折叠保留，正文粗体 Editorial 不误伤）
+- **题号标题格式全覆盖**：链接/粗体/裸文本/h1-h4（`### 1004E - Name`、`### [1004E - Name](<url>)`、`#### 2044A - Easy Problem`）/点号（`1000B. Light It Up`，3+ 位数字 + 大写开头防 `1) Sum` 列表误判）→ 统一转 h2；题面不再转（题目名称唯一 h1 保留，居中大标题不受影响）；editorial 转换补入归一化（此前只加在题面转换，重爬不生效）
+- **前端折叠边界**：题号标题作为 Solution 折叠收束边界（isProblemTitleText 双保险）——折叠块不再吞掉下一题描述；`###` 层级题号标题也能正确 wrap 原题链接
+
 ## [v2.4.0] - 2026-08-06
 
 ### 修复
