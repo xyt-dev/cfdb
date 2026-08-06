@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **样例/代码框复制按钮**：hover 显示，Nerd Font 图标（复制 U+F0C5 / 完成 U+F00C）跟随主题 accent 色、透明背景（hover 才 surface2）；兼容所有浏览器（clipboard API 安全上下文 → execCommand fallback 局域网 http）；`themeColors` 补 surface2（缺失导致按钮白底）
+
+### 修复
+
+- **题面标题层级**：题目名称唯一 h1（24px 居中）；Input/Output/Note/Examples 小节与样例标记从 `##`/`#` 降级为 `####`（不再是大标题）；属性行（time limit per test: / input: / output: 带冒号）居中（CF 风格）
+- **parseHash 支持数字 index**：`#/problem/2164F2` 等链接可直接打开（正则 `[A-Za-z]+` → `[A-Za-z0-9]+`）
+
+
+
 ### 修复
 
 - **假题解防线（根本解决）**：题解 403 错误页/nginx 页检测丢弃（@temp 可重试）；动态 tutorial 占位符替换加无标题博客 fallback（1300 等格式）；写前校验（占位残留/错误页/过短 <100 字符 → 不写）；清理 12 个 403 污染 + 102 个占位残留假题解并重爬恢复 407 场
