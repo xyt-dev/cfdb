@@ -171,8 +171,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(200)
+        # 局域网工具：允许任意来源（本机/局域网设备）
         origin = self.headers.get("Origin", "")
-        if origin in ("http://localhost", "http://127.0.0.1"):
+        if origin:
             self.send_header("Access-Control-Allow-Origin", origin)
         self.end_headers()
 
@@ -180,11 +181,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 if __name__ == "__main__":
     sys.stdout.reconfigure(line_buffering=True)
     print(f"cfdb 服务器启动: http://localhost:{PORT}", flush=True)
+    try:
+        import socket
+        host_ip = socket.gethostbyname(socket.gethostname())
+        if not host_ip.startswith("127."):
+            print(f"局域网访问:   http://{host_ip}:{PORT}", flush=True)
+    except Exception:
+        pass
     print(f"题目数: {len(PROBLEMS)} | 题面目录: {cfcrawl.STATEMENT_DIR} | 解题目录: {cfcrawl.SOLUTION_DIR}")
     threading.Thread(target=auto_update, daemon=True).start()
     print("后台刷新元数据中...")
     try:
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        server = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     except OSError as e:
         print(f"❌ 端口 {PORT} 已被占用: {e}")
         print(f"   cfdb 可能已在运行 → 直接访问 http://localhost:{PORT}")
