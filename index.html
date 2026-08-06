@@ -464,6 +464,7 @@
       .tabs {
         display: flex;
         gap: 6px;
+        flex-shrink: 0; /* 不被压缩：英文按钮文字保持一行 */
       }
       .tab {
         background: var(--surface2);
@@ -475,8 +476,9 @@
         font-size: 13px;
         height: 34px; /* 固定高度：中英文字行高差异不影响 */
         line-height: 20px;
-        width: 116px; /* 固定宽度：← Back / ← 返回 切换不影响后续元素位置 */
+        width: 140px; /* 固定宽度：📄 Statement / 📄 题面 都容纳，中英切换不变 */
         text-align: center;
+        white-space: nowrap; /* 按钮内文字不换行 */
       }
       .tab.on {
         background: var(--accent);
