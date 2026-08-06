@@ -106,13 +106,19 @@ def _embed_images(md: str, prefix: str, img_dir: str, url_prefix: str) -> str:
     img_dir: 图片保存目录
     url_prefix: md 中使用的相对路径前缀"""
     import re
-    for i, url in enumerate(re.findall(r"!\[[^\]]*\]\(([^)]+)\)", md), 1):
+    counter = [0]
+
+    def repl(m):
+        url = m.group(2)
         if not url.startswith(("http://", "https://")):
-            continue  # 非 http(s) 引用跳过（防异常 URL）
-        local = _download_image(url, f"{prefix}_{i}", img_dir)
+            return ""  # 非 http(s) 引用直接移除（防 javascript: 等异常 URL）
+        counter[0] += 1
+        local = _download_image(url, f"{prefix}_{counter[0]}", img_dir)
         if local:
-            md = md.replace(f"({url})", f"({url_prefix}/{os.path.basename(local)})")
-    return md
+            return f"![{m.group(1)}]({url_prefix}/{os.path.basename(local)})"
+        return m.group(0)  # 下载失败：保留原引用（联网时可看）
+
+    return re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", repl, md)
 
 
 def read_statement_md(cid, idx) -> str | None:
