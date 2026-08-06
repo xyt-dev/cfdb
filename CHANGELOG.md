@@ -10,6 +10,7 @@
 
 ### 修复
 
+- **CF 403 封禁感知**：CF 反爬会临时封禁 IP（所有请求 403）→ `update.py` 检测 403/HTML 响应立即退出并明确提示（不再无意义重试 3 次）；`auto_update` 元数据失败时跳过题面/题解爬取（避免继续触发反爬）；爬取限速从 0.2s 调至 1.0s 防再次封禁；本地数据（11335 题元数据 + 11321 题面 + 全部 editorial）不受影响
 - **cfcrawl 参数校验拒绝数字题号**：`fetch_statement_md` 的 `idx.isalpha()` 与 server 同 bug（A1/B2/F1 → 直接失败）→ 改字母开头 + alnum；**264 个 failed_statements 全部重爬恢复（0 失败）**：171 个 isalpha bug + 73 个 PDF 题面 + 2 个限流/超时
 
 ## [v2.0.0] - 2026-08-06
