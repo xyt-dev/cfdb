@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [Unreleased]
+
+### 修复
+
+- **editorial 批量爬取 int contestId 崩溃**：`fetch_all_editorials` 遍历 problems.json 传 int，动态 tutorial 补全的 `len(cid)` 抛 TypeError（批量爬到 655 场卡死）→ `fetch_editorial_md` 统一 `str(cid)`
+
 ## [v2.2.0] - 2026-08-06
 
 ### 新增
