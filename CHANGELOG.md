@@ -30,7 +30,7 @@
 - **题解题号统一渲染为标题 + 分割线**：识别裸文本/粗体/h1-h4/D2A 等全部题号格式（`1900A - Cover in Water`、`**A1 - ...**`、`#### 2044A - ...`、`D2A Submission`），统一渲染为 h2 醒目标题，每题前后加 `<hr>` 分割线，首个标题附「打开 ↗」链接；`1) Sum` 列表项、公式段落等不误判
 - **Hint/Solution/Tutorial 等小节可折叠**：`**Hint #1**`/`**Solution (C++)**`/`**Tutorial**` 等粗体小节渲染为 details 折叠块（默认折叠、点击展开，▸/▾ 指示，**无框简易样式**——标题行+内容缩进 22px，无边框/背景；识别 Hint/Solution/Tutorial/Code/Feedback/Approach/Proof/Observation/Note/Complexity/Implementation/Explanation/Idea/Alternative/Official，长度 ≤50 防误伤长句；遇题目标题分隔线自动收束；展开时重新 typeset 公式解决隐藏态布局问题）
 - **Editorial 不再爬取 Feedback 投票**：CF 标准 6 选项投票组件（Didn't attempt/Great problem/...）在转换层过滤（`_FEEDBACK_RE`），已爬 md 同步清理
-- **「打开 ↗」统一到内容框右上角**：题面/题解 tab 的打开链接均为内容框顶部右对齐普通链接（题面=原题，题解=editorial 博客），随文档流不悬浮遮挡
+- **「打开 ↗」标题内行内链接**：题面 tab 跟在题目标题（h1）后、题解 tab 跟在首个题号标题（h2）后——行内不占整行（题面=原题，题解=editorial 博客）；无标题时兜底右浮动
 - **题号标题链接到原题**：每个题解标题（`1900A - Cover in Water` / `A1 - ...` / `D2A Submission` / `D1C1 ...`）本身可点击直达 CF 原题页；链接构建三级：problems.json 名称匹配（处理 Div1 题在独立 contest 如 2129 的场景）→ 题号数字解析 → 当前比赛兜底
 - **动态 per-problem tutorial 补全**：CF 新版 editorial（2024+）题解是 JS 动态加载（博客只有 `Tutorial is loading...` 占位壳）→ 检测 `problemTutorial` 容器后模拟前端调 `/data/problemTutorial` API（POST problemCode + 会话 cookie + X-Csrf-Token）逐题补全；占位替换三级匹配：精确题号 → 首字母（problemCode=F3 但标题是 F）→ `**Tutorial**` 小节（2032 格式）
 
