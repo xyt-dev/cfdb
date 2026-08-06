@@ -20,6 +20,7 @@
 
 ### 修复
 
+- **含数字题号被拒**：`_valid_ref` 要求 index 纯字母（`isalpha()`），1970A1/A2/B2 等题面请求全部 400 → 改「字母开头 + 字母数字」（A1/B2/F1 放行，纯数字仍拒）
 - **快速切换 题面⇄题解 竞态**：editorial/题面/解题代码的异步响应迟到时会无条件 `replaceChildren()` 覆盖当前视图（题面消失、显示"没有 Editorial"）→ 加载请求序列号（`loadSeq`），切 tab/切题/返回列表后旧响应直接丢弃
 - **图片路由恢复**：移除 shiki 时误删 `/images/` `/eimages/` 路由 → 已恢复（content-type 按扩展名）
 - **题解代码高亮**：md 代码块语言标注（html2md 启发式检测：`#include`/`cin`/`cout`→cpp、`def`/`print(`→python、`fn`+`let`→rust 等；含弱特征：`long long`/`for (int`/`1ll`/C 风格 `){`）
