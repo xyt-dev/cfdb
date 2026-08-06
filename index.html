@@ -1369,7 +1369,9 @@
       }
       function showList() {
         try {
-          history.replaceState(null, "", location.pathname);
+          // 保留 search（filter 参数）——只清 #/problem/ 详情 hash，
+          // 否则返回列表后刷新 filter 全部丢失
+          history.replaceState(null, "", location.pathname + location.search);
         } catch (e) {}
         loadSeq++; // 离开详情页：所有在途请求作废
         currentProblem = null;
