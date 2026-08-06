@@ -164,17 +164,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not (cid.isdigit() and 0 < len(cid) <= 6):
                 self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
             else:
-                if str(cid) in cfcrawl._load_failed_editorials():
-                    # 已确认无 Editorial（记忆）→ 秒回，不再请求 CF
-                    self._send(200, json.dumps({"md": None, "url": None}).encode(), "application/json")
-                    return
-                md = cfcrawl.read_editorial_md(cid) or cfcrawl.fetch_editorial_md(cid)
+                known = str(cid) in cfcrawl._load_failed_editorials()
+                md = cfcrawl.read_editorial_md(cid)
+                if not md:
+                    md = cfcrawl.fetch_editorial_md(cid)
+                    if not md:
+                        # 按需探测也记忆（确认无题解/网络失败）→ 下次秒回
+                        cfcrawl._remember_failed_editorial(cid)
+                        known = True
                 url = cfcrawl.read_editorial_url(cid)
                 if md and md.startswith("<!-- url:"):
                     # 剥离首行注释（纯 md 返回给前端）
                     idx = md.find("\n")
                     md = md[idx + 1:] if idx >= 0 else ""
-                self._send(200, json.dumps({"md": md, "url": url}).encode(), "application/json")
+                self._send(200, json.dumps({"md": md, "url": url, "known": known}).encode(), "application/json")
         elif u.path == "/api/solution":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]

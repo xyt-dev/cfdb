@@ -998,7 +998,9 @@
               const hint = el(
                 "div",
                 "hint",
-                "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
+                d.known
+                  ? "该比赛没有公开的 Editorial（官方未发布题解）。"
+                  : "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
               );
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
