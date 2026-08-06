@@ -131,11 +131,68 @@ def read_statement_md(cid, idx) -> str | None:
         return None
 
 
+def _probe_content_type(url: str, timeout: int = 20) -> str | None:
+    """HEAD/GET 探测响应 content-type（不下载正文）"""
+    try:
+        r = subprocess.run(
+            [CURL, "-sL", "-o", "/dev/null", "-w", "%{content_type}",
+             "--max-time", str(timeout), "-H", f"User-Agent: {UA}", url],
+            capture_output=True, timeout=timeout + 10)
+        if r.returncode == 0:
+            return r.stdout.decode("utf-8", "replace").lower()
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_statement_pdf(cid: str, idx: str, url: str, timeout: int = 30) -> str | None:
+    """PDF 题面：下载 → pdftotext → markdown（公式降级为文本，标注来源）"""
+    import tempfile
+    pdf = os.path.join(tempfile.gettempdir(), f"cfdb-{cid}{idx}.pdf")
+    try:
+        os.remove(pdf)
+    except OSError:
+        pass
+    try:
+        r = subprocess.run(
+            [CURL, "-sL", "--compressed", "-o", pdf, "--max-time", str(timeout),
+             "-H", f"User-Agent: {UA}", url],
+            capture_output=True, timeout=timeout + 10)
+        if r.returncode != 0 or not os.path.exists(pdf) or os.path.getsize(pdf) < 500:
+            return None
+        t = subprocess.run(["pdftotext", "-layout", pdf, "-"],
+                           capture_output=True, timeout=60)
+        if t.returncode != 0:
+            return None
+        text = t.stdout.decode("utf-8", "replace").strip()
+        if len(text) < 200:
+            return None
+        lines = text.split("\n")
+        title = lines[0].strip() if lines else f"{cid}{idx}"
+        body = "\n".join(l.rstrip() for l in lines[1:]).strip()
+        md = f"# {title}\n\n> 📄 本场比赛仅有 PDF 题面（无 HTML 版），已用文本提取，公式可能失真\n\n{body}"
+        os.makedirs(STATEMENT_DIR, exist_ok=True)
+        with open(statement_path(cid, idx), "w", encoding="utf-8") as f:
+            f.write(md)
+        return md
+    except Exception:
+        return None
+    finally:
+        try:
+            os.remove(pdf)
+        except OSError:
+            pass
+
+
 def fetch_statement_md(cid, idx, retries: int = 3, timeout: int = 30) -> str | None:
     """爬取题面转 md 并缓存 —— 仅 update.py 预爬使用"""
-    if not (str(cid).isdigit() and str(idx).isalpha()):
-        return None  # 非法参数直接失败，不触发网络请求
+    if not (str(cid).isdigit() and str(idx) and str(idx)[0].isalpha() and str(idx).isalnum()):
+        return None  # 非法参数直接失败，不触发网络请求（index 可含数字：A1/B2/F1）
     url = f"https://codeforces.com/contest/{cid}/problem/{idx}"
+    # 先探测 content-type：PDF 题面（CF 对无 HTML 题面的比赛只提供 PDF）
+    ct = _probe_content_type(url, timeout=timeout)
+    if ct and "pdf" in ct:
+        return _fetch_statement_pdf(cid, idx, url, timeout=timeout)
     html = fetch_url(url, timeout=timeout, retries=retries)
     if not html or not _valid_statement(html):
         return None
