@@ -268,6 +268,28 @@ def editorial_path(cid) -> str:
     return os.path.join(EDITORIAL_DIR, f"{cid}.md")
 
 
+FAILED_EDITORIALS = os.path.join(ROOT, "failed_editorials.json")
+
+
+def _load_failed_editorials() -> set:
+    """无 Editorial 的比赛记忆（避免每次启动对 ~1800 场无题解比赛重试）"""
+    try:
+        with open(FAILED_EDITORIALS, encoding="utf-8") as f:
+            return set(json.load(f))
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+
+def _remember_failed_editorial(cid):
+    s = _load_failed_editorials()
+    s.add(str(cid))
+    try:
+        with open(FAILED_EDITORIALS, "w", encoding="utf-8") as f:
+            json.dump(sorted(s), f, ensure_ascii=False, indent=1)
+    except OSError:
+        pass
+
+
 def read_editorial_md(cid) -> str | None:
     """纯读本地题解 md"""
     path = editorial_path(cid)
@@ -373,10 +395,12 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
         return None
     link = _find_editorial_link(contest_html)
     if not link:
+        # 该比赛确实无公开 Editorial（稳定事实）→ 记忆跳过
+        _remember_failed_editorial(cid)
         return None
     blog_html = fetch_url(link)
     if not blog_html:
-        return None
+        return None  # 有链接但网络失败：不记忆（暂时问题，下次重试）
     # 收集动态加载的 per-problem tutorial 占位
     codes = []
     if '<div class="problemTutorial"' in blog_html:
@@ -470,9 +494,15 @@ def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
     fetched = 0
     skipped = 0
     failed = 0
+    failed_set = _load_failed_editorials()
     for i, cid in enumerate(contests, 1):
         if os.path.isfile(editorial_path(cid)):
             cached += 1
+            if on_progress:
+                on_progress(i, total, cached, fetched, failed)
+            continue
+        if str(cid) in failed_set:
+            skipped += 1  # 已记忆：该比赛无 editorial（秒跳过，不再请求）
             if on_progress:
                 on_progress(i, total, cached, fetched, failed)
             continue
@@ -480,14 +510,13 @@ def fetch_all_editorials(delay: float = 0.4, dry: bool = False,
             md = fetch_editorial_md(cid, retries=1, timeout=15)
             if md:
                 fetched += 1
-            elif md is None and not os.path.isfile(editorial_path(cid)):
-                # 区分：无 editorial（跳过）vs 爬取失败
-                pass
+            elif not os.path.isfile(editorial_path(cid)):
+                failed += 1  # 无链接已记忆；有链接失败的不记（下次重试）
             time.sleep(delay)
         if on_progress:
             on_progress(i, total, cached, fetched, failed)
         if (i % 20 == 0 or i == total) and not on_progress:
-            print(f"  题解 [{i}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed}")
+            print(f"  题解 [{i}/{total}] 缓存 {cached} 新爬 {fetched} 失败 {failed} 跳过 {skipped}")
     return total, cached, fetched
 
 
