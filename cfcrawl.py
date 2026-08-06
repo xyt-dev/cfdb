@@ -252,16 +252,17 @@ def read_solution(name) -> str | None:
 
 
 # ═══ CF 官方题解（editorial 博客）═══
+_ENTRY_HREF = r'<a[^>]*href="(?:https?://codeforces\.com)?(/blog/entry/\d+)[^"]*"[^>]*'
+
+
 def _find_editorial_link(contest_html: str) -> str | None:
     """在比赛页面找 editorial 博客链接。
-    ① title 属性匹配（常规页面）；② 链接文本匹配（老页面 title 是数字，文本才是 Tutorial）"""
-    for m in re.finditer(r'<a[^>]*href="(/blog/entry/\d+)"[^>]*title="([^"]*)"[^>]*>',
-                         contest_html, re.I):
+    ① title 属性匹配（常规页面）；② 链接文本匹配（老页面 title 是数字/绝对 URL/带参数）"""
+    for m in re.finditer(_ENTRY_HREF + r'title="([^"]*)"[^>]*>', contest_html, re.I):
         if re.search(r"editorial|tutorial", m.group(2), re.I):
             return "https://codeforces.com" + m.group(1)
     # fallback：链接文本含 Tutorial/Editorial（排除 Announcement）
-    for m in re.finditer(r'<a[^>]*href="(/blog/entry/\d+)"[^>]*>([\s\S]*?)</a>',
-                         contest_html, re.I):
+    for m in re.finditer(_ENTRY_HREF + r'>([\s\S]*?)</a>', contest_html, re.I):
         text = m.group(2)
         if re.search(r"tutorial|editorial", text, re.I) and not re.search(r"announcement", text, re.I):
             return "https://codeforces.com" + m.group(1)
