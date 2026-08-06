@@ -602,8 +602,7 @@
           if (activeTags.size) p.set("tags", [...activeTags].join(","));
           if (page > 1) p.set("page", page);
           const qs = p.toString();
-          const url =
-            location.pathname + (qs ? "?" + qs : "") + location.hash;
+          const url = location.pathname + (qs ? "?" + qs : "") + location.hash;
           history.replaceState(null, "", url); // 不产生历史记录
         } catch (e) {}
       }
@@ -625,6 +624,7 @@
       let currentProblem = null;
       let tabCache = {}; // { 'statement': {md, html} | null, 'editorial': ... }
       let currentTab = "statement";
+      let loadSeq = 0; // 加载请求序列号：切 tab/切题后旧响应直接丢弃（防竞态覆盖）
 
       const $ = (id) => document.getElementById(id);
       function el(tag, cls, text) {
@@ -898,7 +898,9 @@
       /* ═══ 视图切换 ═══ */
       function showDetail(p) {
         if (location.hash !== "#/problem/" + p.id) {
-          try { history.pushState(null, "", "#/problem/" + p.id); } catch (e) {}
+          try {
+            history.pushState(null, "", "#/problem/" + p.id);
+          } catch (e) {}
         }
         currentProblem = p;
         tabCache = {};
@@ -921,7 +923,10 @@
         }, 120);
       }
       function showList() {
-        try { history.replaceState(null, "", location.pathname); } catch (e) {}
+        try {
+          history.replaceState(null, "", location.pathname);
+        } catch (e) {}
+        loadSeq++; // 离开详情页：所有在途请求作废
         currentProblem = null;
         $("detail-view").classList.remove("show");
         $("list-view").style.display = "";
@@ -937,17 +942,18 @@
       }
       function loadTab(tab) {
         if (!currentProblem) return;
+        const seq = ++loadSeq; // 本次加载请求的序列号
         const reader = $("reader");
         reader.replaceChildren();
         if (tabCache[tab]) {
           reader.appendChild(mdFrame(tabCache[tab].md, tabCache[tab].url));
           // 缓存恢复也要渲染题面底部的解题代码
-          if (tab === "statement") renderSolutions(reader);
+          if (tab === "statement") renderSolutions(reader, seq);
           return;
         }
         reader.appendChild(el("div", "hint", "加载中..."));
         if (tab === "editorial") {
-          loadEditorial(reader);
+          loadEditorial(reader, seq);
           return;
         }
         fetch(
@@ -955,6 +961,7 @@
         )
           .then((r) => r.json())
           .then((d) => {
+            if (seq !== loadSeq) return; // 已切走（tab/题目变了），丢弃过期响应
             reader.replaceChildren();
             if (!d.md) {
               const hint = el(
@@ -970,9 +977,10 @@
             tabCache[tab] = { md: d.md, url: currentProblem.url };
             reader.appendChild(mdFrame(d.md, currentProblem.url));
             // 题面底部渲染自己的解题代码（无则跳过，不渲染空框）
-            renderSolutions(reader);
+            renderSolutions(reader, seq);
           })
           .catch((err) => {
+            if (seq !== loadSeq) return;
             const d = el("div", "hint", "解题代码加载失败：" + err);
             d.style.color = "var(--red)";
             reader.appendChild(d); // 追加提示，不清空题面
@@ -980,10 +988,11 @@
       }
 
       /* ═══ CF 官方题解（点击时按需爬取 + 缓存）═══ */
-      function loadEditorial(reader) {
+      function loadEditorial(reader, seq) {
         fetch(`/api/editorial?contestId=${currentProblem.contestId}`)
           .then((r) => r.json())
           .then((d) => {
+            if (seq !== loadSeq) return; // 用户已切回题面/别的题，丢弃过期题解响应
             reader.replaceChildren();
             if (!d.md) {
               const hint = el(
@@ -999,6 +1008,7 @@
             reader.appendChild(mdFrame(d.md, d.url));
           })
           .catch((err) => {
+            if (seq !== loadSeq) return;
             reader.replaceChildren();
             const d = el("div", "hint", "题解加载失败：" + err);
             d.style.color = "var(--red)";
@@ -1008,18 +1018,29 @@
 
       /* ═══ hljs 高亮（轻量本地，语言映射 + 主题色联动）═══ */
       const langMap = {
-        rs: "rust", cpp: "cpp", cc: "cpp", cxx: "cpp", c: "c",
-        py: "python", java: "java", go: "go", ts: "typescript",
-        js: "javascript", kt: "kotlin", cs: "csharp", sh: "bash",
+        rs: "rust",
+        cpp: "cpp",
+        cc: "cpp",
+        cxx: "cpp",
+        c: "c",
+        py: "python",
+        java: "java",
+        go: "go",
+        ts: "typescript",
+        js: "javascript",
+        kt: "kotlin",
+        cs: "csharp",
+        sh: "bash",
         txt: "plaintext",
       };
       /* ═══ 解题代码渲染（题面底部追加；无文件则不渲染）═══ */
-      function renderSolutions(reader) {
+      function renderSolutions(reader, seq) {
         fetch(
           `/api/solution?contestId=${currentProblem.contestId}&index=${currentProblem.index}`,
         )
           .then((r) => r.json())
           .then((d) => {
+            if (seq !== loadSeq) return; // 已切走：不追加到错误的视图
             const files = d.files || [];
             if (!files.length) return; // 无代码：不渲染任何东西
             const head = el("h2", null, "💻 我的解题代码");
@@ -1027,12 +1048,24 @@
             head.style.color = "var(--accent)";
             reader.appendChild(head);
             const langName = {
-              rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C",
-              py: "Python", java: "Java", go: "Go", ts: "TypeScript",
-              js: "JavaScript", kt: "Kotlin",
+              rs: "Rust",
+              cpp: "C++",
+              cc: "C++",
+              cxx: "C++",
+              c: "C",
+              py: "Python",
+              java: "Java",
+              go: "Go",
+              ts: "TypeScript",
+              js: "JavaScript",
+              kt: "Kotlin",
             };
             files.forEach((f) => {
-              const head = el("h3", null, `📄 ${f.name}  (${langName[f.ext] || f.ext})`);
+              const head = el(
+                "h3",
+                null,
+                `📄 ${f.name}  (${langName[f.ext] || f.ext})`,
+              );
               head.style.margin = "24px 0 10px";
               head.style.color = "var(--accent)";
               reader.appendChild(head);
@@ -1054,6 +1087,7 @@
             });
           })
           .catch((err) => {
+            if (seq !== loadSeq) return;
             reader.replaceChildren();
             const d = el("div", "hint", "加载失败：" + err);
             d.style.color = "var(--red)";
@@ -1101,9 +1135,8 @@
           return false;
         };
         // 顺序：先 h1-h3（wrap 生成的 h2 不会被后续正则二次匹配）
-        html = html.replace(
-          /<h[1-4]>([\s\S]*?)<\/h[1-4]>/g,
-          (m, t) => (isProblemTitle(t) ? wrap(t) : m),
+        html = html.replace(/<h[1-4]>([\s\S]*?)<\/h[1-4]>/g, (m, t) =>
+          isProblemTitle(t) ? wrap(t) : m,
         );
         // 再裸文本段落题号（如 1900A - Cover in Water）
         html = html.replace(
@@ -1111,9 +1144,8 @@
           (m, t) => (isProblemTitle(t) ? wrap(t) : m),
         );
         // 最后粗体题号（如 **A1 - Balanced Shuffle**）
-        html = html.replace(
-          /<p><strong>([\s\S]*?)<\/strong><\/p>/g,
-          (m, t) => (isProblemTitle(t) ? wrap(t) : m),
+        html = html.replace(/<p><strong>([\s\S]*?)<\/strong><\/p>/g, (m, t) =>
+          isProblemTitle(t) ? wrap(t) : m,
         );
         return html;
       }
@@ -1139,7 +1171,9 @@
          ③ 当前题目 contestId 兜底（A1 → contest/当前/contest/problem/A1） */
       function problemHref(titleText) {
         try {
-          const t = titleText.replace(/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]?\s*/, "").trim();
+          const t = titleText
+            .replace(/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]?\s*/, "")
+            .trim();
           if (!t) return null;
           const num = (titleText.match(/(\d{3,4})/) || [])[1];
           if (ALL.length) {
@@ -1156,7 +1190,8 @@
               );
             }
           }
-          const idx0 = (titleText.match(/^(?:[A-Z]?\d{1,4}|D[12])([A-Z]\d*)/) || [])[1];
+          const idx0 = (titleText.match(/^(?:[A-Z]?\d{1,4}|D[12])([A-Z]\d*)/) ||
+            [])[1];
           if (num && idx0) {
             return "https://codeforces.com/contest/" + num + "/problem/" + idx0;
           }
@@ -1308,7 +1343,10 @@ setTimeout(syncH, 800);setTimeout(syncH, 3000);
       function parseHash() {
         const m = location.hash.match(/#\/problem\/(\d+)([A-Za-z]+)/);
         if (m) {
-          const p = ALL.find(x => x.contestId === Number(m[1]) && x.index === m[2].toUpperCase());
+          const p = ALL.find(
+            (x) =>
+              x.contestId === Number(m[1]) && x.index === m[2].toUpperCase(),
+          );
           if (p) showDetail(p);
         }
       }
@@ -1318,7 +1356,7 @@ setTimeout(syncH, 800);setTimeout(syncH, 3000);
         if (location.hash.startsWith("#/problem/")) {
           parseHash(); // 前进/后退到详情
         } else {
-          showList();  // 后退回列表
+          showList(); // 后退回列表
         }
       });
       load().then(parseHash);
