@@ -143,6 +143,7 @@
         gap: 10px;
         align-items: end;
         border: 1px solid var(--border);
+        position: relative; /* 迷你按钮右上角定位 */
       }
       .filters label {
         display: block;
@@ -163,6 +164,19 @@
       .filters input:focus,
       .filters select:focus {
         outline: none;
+        border-color: var(--accent);
+      }
+      .reset-btn {
+        width: 100%;
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 9px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .reset-btn:hover {
         border-color: var(--accent);
       }
       .tag-chips {
@@ -196,6 +210,22 @@
       }
       .stats-line b {
         color: var(--accent);
+      }
+      .reset-btn.mini {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: auto;
+        padding: 2px 9px;
+        font-size: 12px;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--subtext);
+        z-index: 1;
+      }
+      .reset-btn.mini:hover {
+        color: var(--text);
+        border-color: var(--accent);
       }
 
       table {
@@ -456,6 +486,13 @@
       </div>
 
       <div class="filters">
+        <button
+          class="reset-btn mini"
+          title="恢复默认筛选"
+          onclick="resetFilters()"
+        >
+          ↺
+        </button>
         <div>
           <label>Rating 下限</label
           ><input
@@ -551,6 +588,40 @@
       const PAGE = 50;
       let page = 1;
       const activeTags = new Set();
+      let restorePage = 1;
+
+      /* 筛选状态持久化到 URL 参数（刷新/滚动天然保留，无写入竞态） */
+      function saveState() {
+        try {
+          const p = new URLSearchParams();
+          if ($("f-rmin").value) p.set("rmin", $("f-rmin").value);
+          if ($("f-rmax").value) p.set("rmax", $("f-rmax").value);
+          if ($("f-solved").value) p.set("solved", $("f-solved").value);
+          if ($("f-search").value) p.set("search", $("f-search").value);
+          if ($("f-sort").value !== "id-asc") p.set("sort", $("f-sort").value);
+          if (activeTags.size) p.set("tags", [...activeTags].join(","));
+          if (page > 1) p.set("page", page);
+          const qs = p.toString();
+          const url =
+            location.pathname + (qs ? "?" + qs : "") + location.hash;
+          history.replaceState(null, "", url); // 不产生历史记录
+        } catch (e) {}
+      }
+      function restoreState() {
+        try {
+          const p = new URLSearchParams(location.search);
+          $("f-rmin").value = p.get("rmin") || "";
+          $("f-rmax").value = p.get("rmax") || "";
+          $("f-solved").value = p.get("solved") || "";
+          $("f-search").value = p.get("search") || "";
+          $("f-sort").value = p.get("sort") || "id-asc";
+          activeTags.clear();
+          const tags = p.get("tags");
+          if (tags) tags.split(",").forEach((t) => activeTags.add(t));
+          restorePage = parseInt(p.get("page")) || 1;
+        } catch (e) {}
+      }
+
       let currentProblem = null;
       let tabCache = {}; // { 'statement': {md, html} | null, 'editorial': ... }
       let currentTab = "statement";
@@ -571,8 +642,11 @@
           const rated = ALL.filter((p) => p.rating).length;
           $("total-line").textContent =
             `共 ${ALL.length} 题（有 rating: ${rated} 题，范围 800-3500）`;
+          restoreState();
           buildTagChips();
           apply();
+          page = restorePage; // 恢复页码（apply 会重置为 1）
+          render();
           pollProgress();
         } catch (err) {
           $("total-line").textContent = "加载失败：" + err;
@@ -647,6 +721,7 @@
           .forEach(([t, c]) => {
             const chip = el("span", "chip", `${t} (${c})`);
             chip.dataset.tag = t;
+            if (activeTags.has(t)) chip.classList.add("on"); // 恢复选中
             chip.onclick = () => toggleTag(chip);
             box.appendChild(chip);
           });
@@ -660,6 +735,25 @@
           activeTags.add(t);
           chip.classList.add("on");
         }
+        apply();
+        saveState(); // 标签变化即保存
+      }
+
+      /* 恢复默认筛选 */
+      function resetFilters() {
+        $("f-rmin").value = "";
+        $("f-rmax").value = "";
+        $("f-solved").value = "";
+        $("f-search").value = "";
+        $("f-sort").value = "id-asc";
+        activeTags.clear();
+        document
+          .querySelectorAll(".tag-chips .chip.on")
+          .forEach((c) => c.classList.remove("on"));
+        restorePage = 1;
+        try {
+          history.replaceState(null, "", location.pathname + location.hash);
+        } catch (e) {}
         apply();
       }
 
@@ -798,6 +892,7 @@
       function go(n) {
         page = n;
         render();
+        saveState(); // 翻页保存页码（刷新后恢复）
       }
 
       /* ═══ 视图切换 ═══ */
@@ -1092,9 +1187,15 @@ setTimeout(syncH, 800);setTimeout(syncH, 3000);
 
       /* 事件绑定 */
       ["f-rmin", "f-rmax", "f-solved", "f-search"].forEach((id) =>
-        $(id).addEventListener("input", apply),
+        $(id).addEventListener("input", () => {
+          apply();
+          saveState();
+        }),
       );
-      $("f-sort").addEventListener("change", apply);
+      $("f-sort").addEventListener("change", () => {
+        apply();
+        saveState();
+      });
 
       function parseHash() {
         const m = location.hash.match(/#\/problem\/(\d+)([A-Za-z]+)/);
