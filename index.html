@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CF Database — Codeforces 题目库</title>
+    <title>CF Database — Codeforces Problem Library</title>
     <script src="/vendor/marked.min.js"></script>
     <script src="/vendor/highlight.min.js"></script>
     <style>
@@ -473,13 +473,14 @@
       <div class="topbar">
         <div>
           <h1>CF <span class="accent">Database</span></h1>
-          <div class="sub" id="total-line">加载中...</div>
+          <div class="sub" id="total-line" data-i18n="loading">Loading...</div>
         </div>
-        <button class="theme-btn" onclick="toggleTheme()">🎨 主题</button>
+        <button class="theme-btn" onclick="toggleLang()">文/En</button>
+        <button class="theme-btn" onclick="toggleTheme()" data-i18n="theme">Theme</button>
       </div>
 
       <div class="progress-bar" id="progress-bar">
-        <span id="progress-text">预爬中...</span>
+        <span id="progress-text" data-i18n="preCrawling">Pre-crawling...</span>
         <div class="progress-track">
           <div class="progress-fill" id="progress-fill"></div>
         </div>
@@ -488,13 +489,13 @@
       <div class="filters">
         <button
           class="reset-btn mini"
-          title="恢复默认筛选"
+          data-i18n-title="resetTitle" title="Reset filters"
           onclick="resetFilters()"
         >
-          ↺
+          <span data-i18n="reset">Default</span>
         </button>
         <div>
-          <label>Rating 下限</label
+          <label data-i18n="ratingMin">Min Rating</label
           ><input
             type="number"
             id="f-rmin"
@@ -504,7 +505,7 @@
           />
         </div>
         <div>
-          <label>Rating 上限</label
+          <label data-i18n="ratingMax">Max Rating</label
           ><input
             type="number"
             id="f-rmax"
@@ -514,26 +515,26 @@
           />
         </div>
         <div>
-          <label>解题数 ≥</label
+          <label data-i18n="solvedAtLeast">Solved ≥</label
           ><input type="number" id="f-solved" placeholder="0" />
         </div>
         <div>
-          <label>搜索名称</label
+          <label data-i18n="search">Search</label
           ><input
             type="text"
             id="f-search"
-            placeholder="例如: tree / dp / 1400..."
+            placeholder="e.g. tree / dp / 1400..." data-i18n-ph="searchPh"
           />
         </div>
         <div>
-          <label>排序</label>
+          <label data-i18n="sort">Sort</label>
           <select id="f-sort">
-            <option value="rating-desc">Rating 降序</option>
-            <option value="rating-asc">Rating 升序</option>
-            <option value="solved-desc">解题数 降序</option>
-            <option value="solved-asc">解题数 升序</option>
-            <option value="id-asc" selected>题号 升序</option>
-            <option value="name-asc">名称</option>
+            <option value="rating-desc" data-i18n-opt="ratingDesc">Rating ↓</option>
+            <option value="rating-asc" data-i18n-opt="ratingAsc">Rating ↑</option>
+            <option value="solved-desc" data-i18n-opt="solvedDesc">Solved ↓</option>
+            <option value="solved-asc" data-i18n-opt="solvedAsc">Solved ↑</option>
+            <option value="id-asc" selected data-i18n-opt="idAsc">ID ↑</option>
+            <option value="name-asc" data-i18n-opt="nameAsc">Name</option>
           </select>
         </div>
         <div class="tag-chips" id="tag-chips"></div>
@@ -543,12 +544,12 @@
       <table>
         <thead>
           <tr>
-            <th>题号</th>
-            <th>名称</th>
-            <th>Rating</th>
-            <th>解题数</th>
-            <th>标签</th>
-            <th>链接</th>
+            <th data-i18n="colId">ID</th>
+            <th data-i18n="colName">Name</th>
+            <th data-i18n="colRating">Rating</th>
+            <th data-i18n="colSolved">Solved</th>
+            <th data-i18n="colTags">Tags</th>
+            <th data-i18n="colLink">Link</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -559,7 +560,7 @@
     <!-- ═══ 详情视图 ═══ -->
     <div id="detail-view">
       <div class="detail-bar">
-        <button class="back-btn" onclick="goBack()">← 返回</button>
+        <button class="back-btn" onclick="goBack()" data-i18n="back">← Back</button>
         <div class="detail-title" id="detail-title"></div>
         <div class="detail-meta" id="detail-meta"></div>
         <div class="tabs">
@@ -568,14 +569,14 @@
             id="tab-statement"
             onclick="switchTab('statement')"
           >
-            📄 题面
+            <span data-i18n="tabStatement">📄 Statement</span>
           </button>
           <button
             class="tab"
             id="tab-editorial"
             onclick="switchTab('editorial')"
           >
-            📖 题解
+            <span data-i18n="tabEditorial">📖 Editorial</span>
           </button>
         </div>
       </div>
@@ -583,6 +584,168 @@
     </div>
 
     <script>
+      /* ═══ i18n（默认英文，localStorage 记忆；「文/En」按钮切换）═══ */
+      let lang = "en";
+      try {
+        lang = localStorage.getItem("cfdb-lang") || "en";
+      } catch (e) {}
+      const I18N = {
+        en: {
+          title: "CF Database — Codeforces Problem Library",
+          loading: "Loading...",
+          theme: "Theme",
+          preCrawling: "Pre-crawling...",
+          reset: "Default",
+          resetTitle: "Reset filters",
+          ratingMin: "Min Rating",
+          ratingMax: "Max Rating",
+          solvedAtLeast: "Solved ≥",
+          search: "Search",
+          searchPh: "e.g. tree / dp / 1400...",
+          sort: "Sort",
+          ratingDesc: "Rating ↓",
+          ratingAsc: "Rating ↑",
+          solvedDesc: "Solved ↓",
+          solvedAsc: "Solved ↑",
+          idAsc: "ID ↑",
+          nameAsc: "Name",
+          colId: "ID",
+          colName: "Name",
+          colRating: "Rating",
+          colSolved: "Solved",
+          colTags: "Tags",
+          colLink: "Link",
+          back: "← Back",
+          tabStatement: "📄 Statement",
+          tabEditorial: "📖 Editorial",
+          totalLine: "Total: {n} problems (rated: {r}, 800-3500)",
+          filtered: "Filtered: ",
+          problems: " problems",
+          noMatch: "No matching problems",
+          open: "Open ↗",
+          solvedBadge: "Solved by me",
+          stageMeta: "Refreshing metadata",
+          stageStatements: "Crawling statements",
+          stageEditorials: "Crawling editorials",
+          stageDone: "Done",
+          stageError: "Error",
+          stageIdle: "Idle",
+          progress: "{stage}: {done}/{total} (fetched {fetched}, cached {cached}, failed {failed})",
+          detailMeta: "Rating: {r} · Solved: {s} · {tags}",
+          readerLoading: "Loading...",
+          noStatement: "Statement not downloaded yet.\n\nThe server auto-crawls on startup (progress bar on top),\nor run: python3 update.py --statements",
+          loadFail: "Load failed: ",
+          noEditorialKnown: "This contest has no public Editorial (official solutions not published).",
+          noEditorialUnknown: "No public Editorial for this contest (or crawl failed).\n\nYou can pre-crawl: python3 update.py --editorials",
+          editorialFail: "Editorial load failed: ",
+          mySolutions: "💻 My Solutions",
+          openProblem: "Open on Codeforces",
+          openTop: "Open ↗",
+          imgMissing: "🖼️ Image not loaded",
+          langName: { rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C", py: "Python", java: "Java", go: "Go", ts: "TypeScript", js: "JavaScript", kt: "Kotlin" },
+        },
+        zh: {
+          title: "CF Database — Codeforces 题目库",
+          loading: "加载中...",
+          theme: "🎨 主题",
+          preCrawling: "预爬中...",
+          reset: "默认",
+          resetTitle: "恢复默认筛选",
+          ratingMin: "Rating 下限",
+          ratingMax: "Rating 上限",
+          solvedAtLeast: "解题数 ≥",
+          search: "搜索名称",
+          searchPh: "例如: tree / dp / 1400...",
+          sort: "排序",
+          ratingDesc: "Rating 降序",
+          ratingAsc: "Rating 升序",
+          solvedDesc: "解题数 降序",
+          solvedAsc: "解题数 升序",
+          idAsc: "题号 升序",
+          nameAsc: "名称",
+          colId: "题号",
+          colName: "名称",
+          colRating: "Rating",
+          colSolved: "解题数",
+          colTags: "标签",
+          colLink: "链接",
+          back: "← 返回",
+          tabStatement: "📄 题面",
+          tabEditorial: "📖 题解",
+          totalLine: "共 {n} 题（有 rating: {r} 题，范围 800-3500）",
+          filtered: "筛选结果: ",
+          problems: " 题",
+          noMatch: "没有匹配的题目",
+          open: "打开 ↗",
+          solvedBadge: "已做过（有解题代码）",
+          stageMeta: "刷新元数据",
+          stageStatements: "预爬题面",
+          stageEditorials: "预爬题解",
+          stageDone: "完成",
+          stageError: "异常",
+          stageIdle: "空闲",
+          progress: "{stage}：{done}/{total}（已爬 {fetched}，已有 {cached}，失败 {failed}）",
+          detailMeta: "Rating: {r} · 解题: {s} · {tags}",
+          readerLoading: "加载中...",
+          noStatement: "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
+          loadFail: "加载失败：",
+          noEditorialKnown: "该比赛没有公开的 Editorial（官方未发布题解）。",
+          noEditorialUnknown: "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
+          editorialFail: "题解加载失败：",
+          mySolutions: "💻 我的解题代码",
+          openProblem: "在 Codeforces 打开原题",
+          openTop: "打开 ↗",
+          imgMissing: "🖼️ 图片未加载",
+          langName: { rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C", py: "Python", java: "Java", go: "Go", ts: "TypeScript", js: "JavaScript", kt: "Kotlin" },
+        },
+      };
+      function t(key) {
+        return ((I18N[lang] || I18N.en)[key]) ?? ((I18N.en)[key]) ?? key;
+      }
+      function toggleLang() {
+        lang = lang === "en" ? "zh" : "en";
+        try {
+          localStorage.setItem("cfdb-lang", lang);
+        } catch (e) {}
+        applyI18n();
+      }
+      function applyI18n() {
+        document.title = t("title");
+        document.querySelectorAll("[data-i18n]").forEach((el) => {
+          el.textContent = t(el.dataset.i18n);
+        });
+        document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+          el.title = t(el.dataset.i18nTitle);
+        });
+        document.querySelectorAll("[data-i18n-ph]").forEach((el) => {
+          el.placeholder = t(el.dataset.i18nPh);
+        });
+        document.querySelectorAll("[data-i18n-opt]").forEach((el) => {
+          el.textContent = t(el.dataset.i18nOpt);
+        });
+        if (currentProblem) {
+          rebuildDetail();
+        } else {
+          render();
+        }
+      }
+      function rebuildDetail() {
+        if (!currentProblem) return;
+        $("detail-title").textContent = `${currentProblem.contestId}${currentProblem.index} — ${currentProblem.name}`;
+        $("detail-meta").textContent = t("detailMeta")
+          .replace("{r}", currentProblem.rating ?? "—")
+          .replace("{s}", fmt(currentProblem.solvedCount))
+          .replace("{tags}", currentProblem.tags.join(" / "));
+        const reader = $("reader");
+        reader.replaceChildren();
+        if (tabCache[currentTab]) {
+          reader.appendChild(mdFrame(tabCache[currentTab].md, tabCache[currentTab].url));
+          if (currentTab === "statement") renderSolutions(reader);
+        } else {
+          loadTab(currentTab);
+        }
+      }
+
       let ALL = [],
         FILTERED = [];
       const PAGE = 50;
@@ -640,8 +803,9 @@
           const r = await fetch("/api/problems");
           ALL = await r.json();
           const rated = ALL.filter((p) => p.rating).length;
-          $("total-line").textContent =
-            `共 ${ALL.length} 题（有 rating: ${rated} 题，范围 800-3500）`;
+          $("total-line").textContent = t("totalLine")
+            .replace("{n}", ALL.length)
+            .replace("{r}", rated);
           restoreState();
           buildTagChips();
           apply();
@@ -649,18 +813,18 @@
           render();
           pollProgress();
         } catch (err) {
-          $("total-line").textContent = "加载失败：" + err;
+          $("total-line").textContent = t("loadFail") + err;
         }
       }
 
       /* ═══ 预爬进度 ═══ */
       const STAGE_CN = {
-        meta: "刷新元数据",
-        statements: "预爬题面",
-        editorials: "预爬题解",
-        done: "完成",
-        error: "异常",
-        idle: "空闲",
+        meta: "stageMeta",
+        statements: "stageStatements",
+        editorials: "stageEditorials",
+        done: "stageDone",
+        error: "stageError",
+        idle: "stageIdle",
       };
       let lastDone = -1;
       let lastRefresh = 0;
@@ -686,8 +850,13 @@
             bar.classList.remove("show");
           } else {
             bar.classList.add("show");
-            $("progress-text").textContent =
-              `${STAGE_CN[s.stage] || s.stage}：${s.done}/${s.total}（已爬 ${s.fetched}，已有 ${s.cached}，失败 ${s.failed}）`;
+            $("progress-text").textContent = t("progress")
+              .replace("{stage}", t(STAGE_CN[s.stage] || s.stage))
+              .replace("{done}", s.done)
+              .replace("{total}", s.total)
+              .replace("{fetched}", s.fetched)
+              .replace("{cached}", s.cached)
+              .replace("{failed}", s.failed);
             $("progress-fill").style.width = s.total
               ? (s.done / s.total) * 100 + "%"
               : "0%";
@@ -815,10 +984,10 @@
       function render() {
         const line = $("stats-line");
         line.replaceChildren();
-        line.appendChild(el("span", null, "筛选结果: "));
+        line.appendChild(el("span", null, t("filtered")));
         const b = el("b", null, String(FILTERED.length));
         line.appendChild(b);
-        line.appendChild(el("span", null, " 题"));
+        line.appendChild(el("span", null, t("problems")));
 
         const totalPages = Math.max(1, Math.ceil(FILTERED.length / PAGE));
         if (page > totalPages) page = totalPages;
@@ -828,7 +997,7 @@
         tb.replaceChildren();
         if (!slice.length) {
           const tr = el("tr");
-          const td = el("td", "empty", "没有匹配的题目");
+          const td = el("td", "empty", t("noMatch"));
           td.colSpan = 6;
           tr.appendChild(td);
           tb.appendChild(tr);
@@ -843,7 +1012,7 @@
             idTd.style.color = "var(--teal)";
             nameTd.style.color = "var(--teal)";
             nameTd.style.fontWeight = "600";
-            tr.title = "已做过（有解题代码）";
+            tr.title = t("solvedBadge");
           }
           tr.appendChild(idTd);
           tr.appendChild(nameTd);
@@ -857,7 +1026,7 @@
             .forEach((t) => tagsTd.appendChild(el("span", "mini-tag", t)));
           tr.appendChild(tagsTd);
           const linkTd = el("td");
-          const a = el("a", "link", "打开 ↗");
+          const a = el("a", "link", t("open"));
           a.href = p.url;
           a.target = "_blank";
           a.onclick = (e) => e.stopPropagation();
@@ -908,8 +1077,10 @@
         $("list-view").style.display = "none";
         $("detail-view").classList.add("show");
         $("detail-title").textContent = `${p.contestId}${p.index} — ${p.name}`;
-        $("detail-meta").textContent =
-          `Rating: ${p.rating ?? "—"} · 解题: ${fmt(p.solvedCount)} · ${p.tags.join(" / ")}`;
+        $("detail-meta").textContent = t("detailMeta")
+          .replace("{r}", p.rating ?? "—")
+          .replace("{s}", fmt(p.solvedCount))
+          .replace("{tags}", p.tags.join(" / "));
         $("tab-statement").classList.add("on");
         $("tab-editorial").classList.remove("on");
         loadTab("statement");
@@ -951,7 +1122,7 @@
           if (tab === "statement") renderSolutions(reader, seq);
           return;
         }
-        reader.appendChild(el("div", "hint", "加载中..."));
+        reader.appendChild(el("div", "hint", t("readerLoading")));
         if (tab === "editorial") {
           loadEditorial(reader, seq);
           return;
@@ -967,7 +1138,7 @@
               const hint = el(
                 "div",
                 "hint",
-                "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
+                t("noStatement"),
               );
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
@@ -981,7 +1152,7 @@
           })
           .catch((err) => {
             if (seq !== loadSeq) return;
-            const d = el("div", "hint", "解题代码加载失败：" + err);
+            const d = el("div", "hint", t("loadFail") + err);
             d.style.color = "var(--red)";
             reader.appendChild(d); // 追加提示，不清空题面
           });
@@ -998,9 +1169,7 @@
               const hint = el(
                 "div",
                 "hint",
-                d.known
-                  ? "该比赛没有公开的 Editorial（官方未发布题解）。"
-                  : "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
+                d.known ? t("noEditorialKnown") : t("noEditorialUnknown"),
               );
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
@@ -1012,7 +1181,7 @@
           .catch((err) => {
             if (seq !== loadSeq) return;
             reader.replaceChildren();
-            const d = el("div", "hint", "题解加载失败：" + err);
+            const d = el("div", "hint", t("editorialFail") + err);
             d.style.color = "var(--red)";
             reader.appendChild(d);
           });
@@ -1045,28 +1214,16 @@
             if (seq !== loadSeq) return; // 已切走：不追加到错误的视图
             const files = d.files || [];
             if (!files.length) return; // 无代码：不渲染任何东西
-            const head = el("h2", null, "💻 我的解题代码");
+            const head = el("h2", null, t("mySolutions"));
             head.style.margin = "30px 0 10px";
             head.style.color = "var(--accent)";
             reader.appendChild(head);
-            const langName = {
-              rs: "Rust",
-              cpp: "C++",
-              cc: "C++",
-              cxx: "C++",
-              c: "C",
-              py: "Python",
-              java: "Java",
-              go: "Go",
-              ts: "TypeScript",
-              js: "JavaScript",
-              kt: "Kotlin",
-            };
+            const langName = (I18N[lang] || I18N.en).langName;
             files.forEach((f) => {
               const head = el(
                 "h3",
                 null,
-                `📄 ${f.name}  (${langName[f.ext] || f.ext})`,
+                `${f.name}  (${langName[f.ext] || f.ext})`,
               );
               head.style.margin = "24px 0 10px";
               head.style.color = "var(--accent)";
@@ -1091,7 +1248,7 @@
           .catch((err) => {
             if (seq !== loadSeq) return;
             reader.replaceChildren();
-            const d = el("div", "hint", "加载失败：" + err);
+            const d = el("div", "hint", t("loadFail") + err);
             d.style.color = "var(--red)";
             reader.appendChild(d);
           });
@@ -1124,7 +1281,7 @@
         const wrap = (text) => {
           const href = titleLink ? titleLink(text.trim()) : null;
           const inner = href
-            ? `<a class="ptitle" href="${href}" target="_blank" title="在 Codeforces 打开原题">${text}</a>`
+            ? `<a class="ptitle" href="${href}" target="_blank" title="${t("openProblem")}">${text}</a>`
             : text;
           return `<hr><h2>${inner}</h2><hr>`;
         };
@@ -1276,7 +1433,7 @@ details.fold .fold-body > :first-child { margin-top:6px; }
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]},startup:{typeset:false}};<\/script>
 <script src="/vendor/tex-svg-full.js"><\/script>
-</head><body>${url ? `<div class="topwrap"><a class="open" href="${url}" target="_blank">打开 ↗</a></div>` : ""}<div id="md">${html}</div>
+</head><body>${url ? `<div class="topwrap"><a class="open" href="${url}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="md">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
 /* ═══ Hint/Solution/Tutorial 等小节 → 可折叠 ═══
@@ -1338,7 +1495,7 @@ document.addEventListener('error', function(e){
     if (img.parentNode) {
       var hint = document.createElement('span');
       hint.className = 'img-missing';
-      hint.textContent = '🖼️ 图片未加载';
+      hint.textContent = t("imgMissing");
       img.parentNode.replaceChild(hint, img);
     }
   }
@@ -1414,6 +1571,7 @@ setTimeout(syncH, 800);setTimeout(syncH, 3000);
           showList(); // 后退回列表
         }
       });
+      applyI18n(); // DOM 就绪立即应用语言（默认英文；localStorage 记忆 zh 则切换）
       load().then(parseHash);
     </script>
   </body>
