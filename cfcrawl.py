@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import time
+import zlib
 
 import html2md
 
@@ -77,6 +78,181 @@ def statement_path(cid, idx) -> str:
 IMAGE_DIR = os.path.join(STATEMENT_DIR, "images")
 
 
+def _flatten_transparent_png(path: str) -> bool:
+    """透明 PNG → 白色背景（项目功能，纯标准库 zlib/struct——零外部依赖）。
+    支持 colortype 6（RGBA）/ 4（gray+alpha）/ 3（palette+tRNS），8-bit 非隔行。
+    透明像素按 alpha 合成到白色；不透明/不支持格式返回 False（原图保留）"""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return False
+        pos = 8
+        idat = b""
+        plte = trns = None
+        w = h = bitdepth = colortype = None
+        while pos + 8 <= len(data):
+            ln = int.from_bytes(data[pos:pos + 4], "big")
+            typ = data[pos + 4:pos + 8]
+            body = data[pos + 8:pos + 8 + ln]
+            if typ == b"IHDR":
+                w = int.from_bytes(body[0:4], "big")
+                h = int.from_bytes(body[4:8], "big")
+                bitdepth = body[8]
+                colortype = body[9]
+                if body[12] != 0:
+                    return False  # 隔行（Adam7）不支持
+            elif typ == b"IDAT":
+                idat += body
+            elif typ == b"PLTE":
+                plte = body
+            elif typ == b"tRNS":
+                trns = body
+            elif typ == b"IEND":
+                break
+            pos += 12 + ln
+        if w is None or h is None or not idat:
+            return False
+        if colortype == 3:
+            if bitdepth not in (1, 2, 4, 8):
+                return False  # palette 支持 1/2/4/8-bit
+        elif colortype in (4, 6):
+            if bitdepth != 8:
+                return False
+        elif colortype == 2:
+            if not trns:
+                return False  # RGB 无透明色键——不处理
+        else:
+            return False  # 仅透明格式需要处理
+        raw = zlib.decompress(idat)
+        if colortype == 3:
+            stride = (w * bitdepth + 7) // 8
+            channels = 1  # unfilter 的 bpp（低位 palette 用 1 近似——Sub/Paeth 罕见）
+        else:
+            channels = {6: 4, 4: 2, 2: 3}[colortype]
+            stride = w * channels
+        rows = []
+        prev = bytearray(stride)
+        p2 = 0
+        for _ in range(h):
+            ft = raw[p2]
+            row = bytearray(raw[p2 + 1:p2 + 1 + stride])
+            p2 += 1 + stride
+            if ft == 1:  # Sub
+                for i in range(channels, stride):
+                    row[i] = (row[i] + row[i - channels]) & 0xFF
+            elif ft == 2:  # Up
+                for i in range(stride):
+                    row[i] = (row[i] + prev[i]) & 0xFF
+            elif ft == 3:  # Average
+                for i in range(stride):
+                    left = row[i - channels] if i >= channels else 0
+                    row[i] = (row[i] + ((left + prev[i]) >> 1)) & 0xFF
+            elif ft == 4:  # Paeth
+                for i in range(stride):
+                    a = row[i - channels] if i >= channels else 0
+                    b = prev[i]
+                    c = prev[i - channels] if i >= channels else 0
+                    pv = a + b - c
+                    pa, pb, pc = abs(pv - a), abs(pv - b), abs(pv - c)
+                    pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                    row[i] = (row[i] + pr) & 0xFF
+            rows.append(row)
+            prev = row
+        # alpha 合成到白色 → RGB
+        out = bytearray(w * h * 3)
+        o = 0
+        if colortype == 6:  # RGBA
+            for row in rows:
+                for i in range(0, stride, 4):
+                    r, g, b, a = row[i], row[i + 1], row[i + 2], row[i + 3]
+                    if a == 255:
+                        out[o], out[o + 1], out[o + 2] = r, g, b
+                    elif a == 0:
+                        out[o], out[o + 1], out[o + 2] = 255, 255, 255
+                    else:
+                        inv = 255 - a
+                        out[o] = (r * a + 255 * inv + 127) // 255
+                        out[o + 1] = (g * a + 255 * inv + 127) // 255
+                        out[o + 2] = (b * a + 255 * inv + 127) // 255
+                    o += 3
+        elif colortype == 4:  # gray + alpha
+            for row in rows:
+                for i in range(0, stride, 2):
+                    g, a = row[i], row[i + 1]
+                    if a == 255:
+                        v = g
+                    elif a == 0:
+                        v = 255
+                    else:
+                        v = (g * a + 255 * (255 - a) + 127) // 255
+                    out[o] = out[o + 1] = out[o + 2] = v
+                    o += 3
+        elif colortype == 2:  # RGB + tRNS 透明色键（tRNS 每色 2 字节 16-bit——8-bit 图取低字节）
+            kr, kg, kb = trns[1], trns[3], trns[5]
+            for row in rows:
+                for i in range(0, stride, 3):
+                    r, g, b = row[i], row[i + 1], row[i + 2]
+                    if (r, g, b) == (kr, kg, kb):
+                        out[o], out[o + 1], out[o + 2] = 255, 255, 255
+                    else:
+                        out[o], out[o + 1], out[o + 2] = r, g, b
+                    o += 3
+        else:  # palette + tRNS（含 1/2/4-bit 拆位）
+            ncolors = len(plte) // 3 if plte else 0
+            pal = [(plte[i * 3], plte[i * 3 + 1], plte[i * 3 + 2]) for i in range(ncolors)]
+            alphas = [255] * ncolors
+            if trns:
+                for i in range(min(len(trns), ncolors)):
+                    alphas[i] = trns[i]
+            if bitdepth == 8:
+                def idx_iter(row):
+                    return iter(row)
+            else:
+                per_byte = 8 // bitdepth
+                mask = (1 << bitdepth) - 1
+                def idx_iter(row):
+                    for byte in row:
+                        for sh in range(per_byte - 1, -1, -1):
+                            yield (byte >> (sh * bitdepth)) & mask
+            for row in rows:
+                for idx in idx_iter(row):
+                    if idx < ncolors:
+                        r, g, b = pal[idx]
+                        a = alphas[idx]
+                    else:
+                        r = g = b = 255
+                        a = 255
+                    if a == 255:
+                        out[o], out[o + 1], out[o + 2] = r, g, b
+                    elif a == 0:
+                        out[o], out[o + 1], out[o + 2] = 255, 255, 255
+                    else:
+                        inv = 255 - a
+                        out[o] = (r * a + 255 * inv + 127) // 255
+                        out[o + 1] = (g * a + 255 * inv + 127) // 255
+                        out[o + 2] = (b * a + 255 * inv + 127) // 255
+                    o += 3
+        # 重编码（filter 0）写回
+        enc = bytearray()
+        for y in range(h):
+            enc.append(0)
+            enc += out[y * w * 3:(y + 1) * w * 3]
+
+        def _chunk(typ, body):
+            c = len(body).to_bytes(4, "big") + typ + body
+            return c + (zlib.crc32(typ + body) & 0xFFFFFFFF).to_bytes(4, "big")
+
+        ihdr = w.to_bytes(4, "big") + h.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
+        new = (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr)
+               + _chunk(b"IDAT", zlib.compress(bytes(enc), 6)) + _chunk(b"IEND", b""))
+        with open(path, "wb") as f:
+            f.write(new)
+        return True
+    except Exception:
+        return False
+
+
 def _download_image(url: str, name: str, img_dir: str | None = None) -> str | None:
     """下载图片到 {img_dir}/{name}{ext}，返回本地绝对路径"""
     img_dir = img_dir or IMAGE_DIR
@@ -94,6 +270,8 @@ def _download_image(url: str, name: str, img_dir: str | None = None) -> str | No
         if r.returncode == 0 and r.stdout and not r.stdout.startswith(b"<html"):
             with open(path, "wb") as f:
                 f.write(r.stdout)
+            if ext == ".png":
+                _flatten_transparent_png(path)  # 透明 PNG → 白底（深色主题可读）
             return path
     except Exception:
         pass
