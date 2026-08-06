@@ -29,6 +29,7 @@ class Html2Md(HTMLParser):
         self._prop_depth = 0
         self._is_prop_value = False
         self._bold_pending = 0   # <b> 延迟输出计数（空粗体 <b><br/></b> 不产生 **）
+        self._a_href = ""        # <a> 链接（markdown 链接输出）
 
     # ── 辅助 ──
     def _nl(self):
@@ -124,13 +125,28 @@ class Html2Md(HTMLParser):
                 self._nl()
                 self.out.append("#" * level + " ")
             else:
-                self.out.append("\n")
+                if self.li_level > 0:
+                    pass  # li 内的 div/p：行内（CF 原文 li 内嵌套 div 分行，避免拆行）
+                else:
+                    self.out.append("\n")
             return
 
         if tag == "br":
             self.out.append("\n")
             return
 
+        # 链接：<a href="...">text</a> → [text](<href>)；无效 href（锚点/js）仅文本
+        if tag == "a":
+            href = attrs.get("href") or ""
+            # 相对/协议相对 URL 归一化为绝对（与 img 一致）
+            if href.startswith("//"):
+                href = "https:" + href
+            elif href.startswith("/"):
+                href = "https://codeforces.com" + href
+            self._a_href = href
+            if self._a_href and not self._a_href.startswith(("#", "javascript:")):
+                self.out.append("[")
+            return
         # 行内格式：粗体延迟输出（等有内容再 flush；空粗体直接丢弃）
         if tag == "b" or tag == "strong":
             self._bold_pending += 1
@@ -182,12 +198,21 @@ class Html2Md(HTMLParser):
             return
 
         if tag in ("p", "div", "h1", "h2", "h3", "h4"):
-            self.out.append("\n")
+            if self.li_level > 0 and tag in ("p", "div"):
+                pass  # li 内行内
+            else:
+                self.out.append("\n")
             return
         if tag == "li":
             if self.li_level > 0:
                 self.li_level -= 1
             self.out.append("\n")
+            return
+        if tag == "a":
+            href = self._a_href
+            self._a_href = ""
+            if href and not href.startswith(("#", "javascript:")):
+                self.out.append(f"](<{href}>)")
             return
         if tag in ("b", "strong"):
             if self._bold_pending > 0:

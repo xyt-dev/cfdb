@@ -125,6 +125,8 @@ def read_statement_md(cid, idx) -> str | None:
     """纯读本地题面 md（未预爬返回 None）——server 端用"""
     path = statement_path(cid, idx)
     try:
+        if os.path.getsize(path) <= 200:
+            return None  # 空壳（爬取异常产物）：视为未爬
         with open(path, encoding="utf-8") as f:
             return f.read()
     except OSError:
@@ -206,6 +208,9 @@ def fetch_statement_md(cid, idx, retries: int = 3, timeout: int = 30) -> str | N
         return None
     md = html2md.problem_statement_to_md(html)
     md = _embed_images(md, f"{cid}{idx}", IMAGE_DIR, "images")  # 下载题面图片
+    # 空壳保护：转换结果过短（页面异常产物）视为失败，不写空文件（根因修复）
+    if not md or len(md.strip()) < 50:
+        return None
     try:
         os.makedirs(STATEMENT_DIR, exist_ok=True)
         with open(statement_path(cid, idx), "w", encoding="utf-8") as f:
@@ -413,6 +418,10 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     blog_html = fetch_url(link)
     if not blog_html:
         return None
+    # 403/被拦页面：丢弃并标记临时（解封后可重试），避免把错误页写入题解
+    if "403 Forbidden" in blog_html or "Just a moment" in blog_html or "nginx/" in blog_html:
+        _remember_failed_editorial(f"{cid}@temp")
+        return None
     # editorial 未发布时，contest 页 tutorial 链接指向公告博客 → 丢弃并标记（可重试）
     if "Announcement of Codeforces Round" in blog_html:
         _remember_failed_editorial(f"{cid}@announcement")
@@ -422,6 +431,10 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     if '<div class="problemTutorial"' in blog_html:
         codes = re.findall(r'problemcode="([^"]+)"', blog_html)
     md = html2md.editorial_to_md(blog_html)
+    # 写前校验：转换结果过短（错误页产物）视为失败，不写文件
+    if not md or len(md.strip()) < 100 or "403 Forbidden" in md:
+        _remember_failed_editorial(f"{cid}@temp")
+        return None
     # md 层替换占位符为真实题解（避免 HTML 层 ttypography 嵌套截断）
     if codes and "Tutorial is loading" in md:
         tutorials = _fetch_problem_tutorials(cid, codes)
@@ -477,7 +490,9 @@ def fetch_all_statements(delay: float = 0.4, dry: bool = False,
     failed_set = _load_failed()
     for i, p in enumerate(problems, 1):
         key = f"{p["contestId"]}{p["index"]}"
-        if key in failed_set or os.path.isfile(statement_path(p["contestId"], p["index"])):
+        sp = statement_path(p["contestId"], p["index"])
+        # 空壳文件（<=200B，爬取异常产物）视为未爬——下次自动补
+        if key in failed_set or (os.path.isfile(sp) and os.path.getsize(sp) > 200):
             # 已预爬或已知失败：秒跳过（不 sleep）
             cached += 1
             if on_progress:

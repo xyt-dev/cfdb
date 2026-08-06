@@ -1,6 +1,8 @@
 # 爬取数据（update.py 可再生成，不入库）
 statements/
+statements_bak/
 editorials/
+editorials_bak/
 problems.json
 failed_statements.json
 

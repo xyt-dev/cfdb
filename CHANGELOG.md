@@ -13,7 +13,6 @@
 - **failed_editorials 并发写安全**：记忆写入加线程锁（HTTP 线程与后台探测并发写不再互相覆盖丢条目）
 
 
-
 ### 修复
 
 - **editorial 批量爬取 int contestId 崩溃**：`fetch_all_editorials` 遍历 problems.json 传 int，动态 tutorial 补全的 `len(cid)` 抛 TypeError（批量爬到 655 场卡死）→ `fetch_editorial_md` 统一 `str(cid)`

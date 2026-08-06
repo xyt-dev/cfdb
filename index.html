@@ -1617,10 +1617,15 @@ document.addEventListener('error', function(e){
     }
   }
 }, true);
-/* 所有链接强制新标签打开（防止 iframe 内导航渲染） */
+/* 链接新标签打开：补 target=_blank 防止 iframe 内导航；
+   不 preventDefault/window.open（原生导航，避免浏览器弹窗拦截导致"点不了"） */
+document.querySelectorAll('a').forEach(function(a){
+  if (!a.target) a.target = '_blank';
+  a.rel = 'noopener';
+});
 document.addEventListener('click', function(e){
   var a = e.target.closest('a');
-  if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
+  if (a && !a.target) { a.target = '_blank'; a.rel = 'noopener'; }
 });
 function syncH(){parent.postMessage({cfdbH:document.body.scrollHeight},'*')}
 syncH();
