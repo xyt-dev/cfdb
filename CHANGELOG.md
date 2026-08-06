@@ -13,6 +13,8 @@
 - **题解图片爬取**：editorial 博客配图同样本地化（`editorials/images/{比赛号}_{n}.png`，`/eimages/` 路由）
 - **图片等比缩放**：`max-width:100% + height:auto`，超宽图片不溢出容器、保持纵横比
 - **图片加载失败占位提示**：显示「🖼️ 图片未加载」而非隐藏/破图图标
+- **题解题号统一渲染为标题 + 分割线**：识别裸文本/粗体/h1-h4/D2A 等全部题号格式（`1900A - Cover in Water`、`**A1 - ...**`、`#### 2044A - ...`、`D2A Submission`），统一渲染为 h2 醒目标题，每题前后加 `<hr>` 分割线，首个标题附「打开 ↗」链接；`1) Sum` 列表项、公式段落等不误判
+- **动态 per-problem tutorial 补全**：CF 新版 editorial（2024+）题解是 JS 动态加载（博客只有 `Tutorial is loading...` 占位壳）→ 检测 `problemTutorial` 容器后模拟前端调 `/data/problemTutorial` API（POST problemCode + 会话 cookie + X-Csrf-Token）逐题补全；占位替换三级匹配：精确题号 → 首字母（problemCode=F3 但标题是 F）→ `**Tutorial**` 小节（2032 格式）
 
 ### 修复
 
@@ -40,7 +42,7 @@ md（原始 LaTeX，含 \\ 换行、* 乘法、[] 艾弗森括号）
 ```
 
 | 修复 | 根因 |
-|---|---|
+| --- | --- |
 | **`\\` 换行被破坏** | marked 把 LaTeX 的 `\\`（多行换行命令）当 markdown 转义 → 输出单 `\` → MathJax 收到残缺 `\k`、`\=` → **红色未知命令乱码** |
 | **`*` 乘法被拆断** | marked 把公式内成对 `*`（如 `(n-i)*\sum...*`）解析为强调 → `<em>` 标签**拆断公式** → MathJax 无法识别 |
 | **`[]` 被当链接** | 艾弗森括号 `[gcd(a_i,a_j)=k]` 被 marked 当链接文本处理 |
