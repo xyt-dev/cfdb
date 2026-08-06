@@ -1508,7 +1508,7 @@ pre { background:${c.surface}; border:1px solid ${c.border}; border-radius:8px;
   font:13.5px/1.6 ${monoStack}; }
 code { background:${c.surface}; padding:1px 6px; border-radius:4px; font-size:13.5px; font-family:${monoStack}; }
 pre code { background:none; padding:0; }
-h1 { font-size:21px; margin:6px 0 14px; font-family:${sansStack}; }
+h1 { font-size:24px; margin:6px 0 14px; font-family:${sansStack}; text-align:center; }
 /* 右上角「打开 ↗」（fixed 相对 iframe 视口） */
 /* 顶部「打开 ↗」行：占一行右对齐，链接本身只占文字宽度（不铺满整行） */
 .topwrap { text-align:right; margin-bottom:10px; }
@@ -1518,7 +1518,7 @@ h1 { font-size:21px; margin:6px 0 14px; font-family:${sansStack}; }
 /* 题号标题链接到原题 */
 a.ptitle { color:${c.accent}; text-decoration:none; }
 a.ptitle:hover { text-decoration:underline; }
-h2 { font-size:17px; color:${c.accent}; margin:22px 0 8px; font-family:${sansStack}; }
+h2 { font-size:19px; color:${c.accent}; margin:22px 0 8px; font-family:${sansStack}; }
 h3 { font-size:15.5px; margin:18px 0 6px; }
 a { color:${c.accent}; }
 hr { border:none; border-top:1px solid ${c.border}; margin:18px 0; }
@@ -1553,6 +1553,14 @@ details.fold .fold-body > :first-child { margin-top:6px; }
 </head><body>${url ? `<div class="topwrap"><a class="open" href="${url}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="md">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
+/* 题面属性行（time limit per test: / input: / output: 等带冒号行）居中（CF 风格）；
+   不含 Input/Output 小节标题（无冒号，保持左对齐） */
+document.querySelectorAll('#md > p').forEach(function(p){
+  var s = p.querySelector('strong');
+  if (s && /^(time limit per test|memory limit per test|input|output)\s*:/i.test(s.textContent)) {
+    p.style.textAlign = 'center';
+  }
+});
 /* ═══ Hint/Solution/Tutorial 等小节 → 可折叠 ═══
    遇小节标题开启 details，收集后续兄弟节点，遇下一小节标题/分割线/标题收束 */
 (function () {
@@ -1675,7 +1683,7 @@ setTimeout(syncH, 800);setTimeout(syncH, 3000);
       });
 
       function parseHash() {
-        const m = location.hash.match(/#\/problem\/(\d+)([A-Za-z]+)/);
+        const m = location.hash.match(/#\/problem\/(\d+)([A-Za-z0-9]+)/); // index 可含数字（A1/F2/01）
         if (m) {
           const p = ALL.find(
             (x) =>

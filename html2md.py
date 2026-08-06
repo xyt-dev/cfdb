@@ -108,11 +108,12 @@ class Html2Md(HTMLParser):
             self._is_prop_value = True
             return
 
-        # 小节标题（Input / Output / Note / Examples）
+        # 小节标题（Input / Output / Note / Examples）——h4 小标题
+        # （题目名称才是唯一大标题 h1；小节不占大标题层级）
         if tag == "div" and "section-title" in cls.split():
             self._nl()
             self._nl()
-            self.out.append("## ")
+            self.out.append("#### ")
             return
 
         if tag in ("p", "div", "li", "h1", "h2", "h3", "h4"):
@@ -302,7 +303,10 @@ def problem_statement_to_md(html_text: str) -> str:
         src = html_text  # 兜底：全文
     p = Html2Md()
     p.feed(src)
-    return _normalize_math(_clean(p.out))
+    md = _normalize_math(_clean(p.out))
+    # 样例标记（.title 误转的 # Input / # Output）降级为 h4——题目名称才是唯一 h1
+    md = re.sub(r"^# (Input|Output)\s*$", r"#### \1", md, flags=re.M)
+    return md
 
 
 class _DivExtractor(HTMLParser):
