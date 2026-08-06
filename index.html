@@ -540,6 +540,7 @@
             <option value="solved-desc" data-i18n-opt="solvedDesc">Solved ↓</option>
             <option value="solved-asc" data-i18n-opt="solvedAsc">Solved ↑</option>
             <option value="id-asc" selected data-i18n-opt="idAsc">ID ↑</option>
+            <option value="id-desc" data-i18n-opt="idDesc">ID ↓</option>
             <option value="name-asc" data-i18n-opt="nameAsc">Name</option>
           </select>
         </div>
@@ -614,6 +615,7 @@
           solvedDesc: "Solved ↓",
           solvedAsc: "Solved ↑",
           idAsc: "ID ↑",
+          idDesc: "ID ↓",
           nameAsc: "Name",
           colId: "ID",
           colName: "Name",
@@ -668,6 +670,7 @@
           solvedDesc: "解题数 降序",
           solvedAsc: "解题数 升序",
           idAsc: "题号 升序",
+          idDesc: "题号 降序",
           nameAsc: "名称",
           colId: "题号",
           colName: "名称",
@@ -975,6 +978,8 @@
           "solved-asc": (a, b) => a.solvedCount - b.solvedCount,
           "id-asc": (a, b) =>
             a.contestId - b.contestId || a.index.localeCompare(b.index),
+          "id-desc": (a, b) =>
+            b.contestId - a.contestId || b.index.localeCompare(a.index),
           "name-asc": (a, b) => a.name.localeCompare(b.name),
         }[sort];
         FILTERED.sort(cmp);
