@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="catppuccin">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CF Database — Codeforces 题目库</title>
+    <script src="/vendor/marked.min.js"></script>
+    <script src="/vendor/highlight.min.js"></script>
+    <!-- shiki 本地化：importmap 映射 npm 依赖树（零 CDN） -->
+    <script type="importmap">
+      {
+        "imports": {
+          "shiki/bundle/full": "/npm/shiki/dist/bundle-full.mjs",
+          "@shikijs/core": "/npm/@shikijs/core/dist/index.mjs",
+          "@shikijs/engine-oniguruma": "/npm/@shikijs/engine-oniguruma/dist/index.mjs",
+          "@shikijs/engine-javascript": "/npm/@shikijs/engine-javascript/dist/index.mjs",
+          "@shikijs/types": "/npm/@shikijs/types/dist/index.mjs",
+          "@shikijs/vscode-textmate": "/npm/@shikijs/vscode-textmate/dist/index.js",
+          "@shikijs/langs/": "/npm/@shikijs/langs/dist/",
+          "@shikijs/themes/": "/npm/@shikijs/themes/dist/"
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --radius: 10px;
+        --sans: "Noto Sans SC", "PingFang SC", sans-serif;
+        --serif: Georgia, "Noto Serif SC", "Songti SC", serif;
+      }
+      /* ═══ Catppuccin Mocha ═══ */
+      [data-theme="catppuccin"] {
+        --bg: #1e1e2e;
+        --surface: #313244;
+        --surface2: #45475a;
+        --border: #585b70;
+        --text: #cdd6f4;
+        --subtext: #a6adc8;
+        --accent: #89b4fa;
+        --accent2: #f38ba8;
+        --teal: #94e2d5;
+        --r900: #6c7086;
+        --r1200: #8a8f98;
+        --r1400: #a6e3a1;
+        --r1600: #94e2d5;
+        --r1900: #89dceb;
+        --r2100: #cba6f7;
+        --r2400: #fab387;
+        --r3000: #f38ba8;
+      }
+      /* ═══ Gruvbox Dark ═══ */
+      [data-theme="gruvbox"] {
+        --bg: #282828;
+        --surface: #3c3836;
+        --surface2: #504945;
+        --border: #665c54;
+        --text: #ebdbb2;
+        --subtext: #a89984;
+        --accent: #83a598;
+        --accent2: #fb4934;
+        --teal: #8ec07c;
+        --r900: #928374;
+        --r1200: #a89984;
+        --r1400: #b8bb26;
+        --r1600: #8ec07c;
+        --r1900: #83a598;
+        --r2100: #d3869b;
+        --r2400: #fe8019;
+        --r3000: #fb4934;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        padding: 20px;
+        transition:
+          background 0.3s,
+          color 0.3s;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 22px;
+        margin-bottom: 4px;
+      }
+      h1 .accent {
+        color: var(--accent);
+      }
+      .sub {
+        color: var(--subtext);
+        font-size: 13px;
+        margin-bottom: 16px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .theme-btn {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+        padding: 8px 14px;
+        border-radius: var(--radius);
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .theme-btn:hover {
+        border-color: var(--accent);
+      }
+
+      /* 爬取进度条 */
+      .progress-bar {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 8px 14px;
+        margin: 10px 0;
+        font-size: 13px;
+        color: var(--subtext);
+        display: none;
+        align-items: center;
+        gap: 10px;
+      }
+      .progress-bar.show {
+        display: flex;
+      }
+      .progress-track {
+        flex: 1;
+        height: 6px;
+        background: var(--surface2);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        width: 0%;
+        background: var(--accent);
+        transition: width 0.5s;
+      }
+
+      .filters {
+        background: var(--surface);
+        border-radius: var(--radius);
+        padding: 14px;
+        margin: 14px 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 10px;
+        align-items: end;
+        border: 1px solid var(--border);
+      }
+      .filters label {
+        display: block;
+        font-size: 12px;
+        color: var(--subtext);
+        margin-bottom: 4px;
+      }
+      .filters input,
+      .filters select {
+        width: 100%;
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 9px;
+        font-size: 13px;
+      }
+      .filters input:focus,
+      .filters select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .tag-chips {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        max-height: 84px;
+        overflow-y: auto;
+      }
+      .chip {
+        background: var(--surface2);
+        color: var(--subtext);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 3px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .chip.on {
+        background: var(--accent);
+        color: var(--bg);
+        border-color: var(--accent);
+        font-weight: 600;
+      }
+      .stats-line {
+        color: var(--subtext);
+        font-size: 13px;
+        margin-bottom: 10px;
+      }
+      .stats-line b {
+        color: var(--accent);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      thead th {
+        text-align: left;
+        padding: 10px 12px;
+        font-size: 12px;
+        color: var(--subtext);
+        background: var(--surface2);
+        white-space: nowrap;
+      }
+      tbody tr {
+        border-top: 1px solid var(--border);
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      tbody tr:hover {
+        background: var(--surface2);
+      }
+      td {
+        padding: 9px 12px;
+        font-size: 13px;
+        vertical-align: middle;
+      }
+      .id {
+        font-family: monospace;
+        color: var(--accent);
+        white-space: nowrap;
+      }
+      .name {
+        max-width: 340px;
+      }
+      .rating {
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .solved {
+        font-family: monospace;
+        white-space: nowrap;
+      }
+      .tags-td {
+        max-width: 380px;
+      }
+      .mini-tag {
+        display: inline-block;
+        font-size: 11px;
+        color: var(--subtext);
+        margin-right: 6px;
+      }
+      .link {
+        color: var(--accent);
+        text-decoration: none;
+        font-size: 12px;
+      }
+      .link:hover {
+        text-decoration: underline;
+      }
+      .empty {
+        text-align: center;
+        color: var(--subtext);
+        padding: 40px;
+      }
+
+      .pager {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        margin-top: 14px;
+        flex-wrap: wrap;
+      }
+      .pager button {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .pager button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      .pager button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .pager .cur {
+        background: var(--accent);
+        color: var(--bg);
+        font-weight: 700;
+        border-color: var(--accent);
+      }
+      .pager .info {
+        color: var(--subtext);
+        font-size: 12px;
+      }
+
+      /* ═══ 详情视图（新页面式）═══ */
+      #detail-view {
+        display: none;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      #detail-view.show {
+        display: block;
+      }
+      .detail-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 10px 16px;
+        margin-bottom: 18px;
+      }
+      .back-btn {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 14px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .back-btn:hover {
+        border-color: var(--accent);
+      }
+      .detail-title {
+        font-size: 16px;
+        font-weight: 600;
+        flex: 1;
+        min-width: 200px;
+      }
+      .detail-meta {
+        font-size: 12px;
+        color: var(--subtext);
+      }
+      .tabs {
+        display: flex;
+        gap: 6px;
+      }
+      .tab {
+        background: var(--surface2);
+        color: var(--subtext);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 7px 18px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .tab.on {
+        background: var(--accent);
+        color: var(--bg);
+        border-color: var(--accent);
+        font-weight: 600;
+      }
+
+      /* 阅读区：居中窄栏，衬线排版，无内部滚动条（高度自适应） */
+      .reader {
+        max-width: 1200px; /* 与上方 detail-bar 同宽对齐 */
+        margin: 0 auto;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 28px 34px;
+      }
+      .reader .hint {
+        color: var(--subtext);
+        text-align: center;
+        padding: 50px 0;
+        font-size: 14px;
+        line-height: 2;
+      }
+      .statement-frame {
+        width: 100%;
+        border: none;
+        display: block;
+        background: transparent;
+        min-height: 420px;
+      }
+      /* ═══ 代码高亮主题（CSS 变量 → 自动跟随 catppuccin/gruvbox）═══ */
+      .hljs {
+        background: transparent;
+        color: var(--text);
+      }
+      .hljs-keyword,
+      .hljs-selector-tag,
+      .hljs-literal {
+        color: var(--accent2);
+      }
+      .hljs-string,
+      .hljs-regexp,
+      .hljs-addition {
+        color: var(--teal);
+      }
+      .hljs-number,
+      .hljs-symbol,
+      .hljs-bullet {
+        color: var(--r2400);
+      }
+      .hljs-comment,
+      .hljs-quote {
+        color: var(--subtext);
+        font-style: italic;
+      }
+      .hljs-title,
+      .hljs-function,
+      .hljs-title.function_,
+      .hljs-section {
+        color: var(--accent);
+      }
+      .hljs-type,
+      .hljs-built_in,
+      .hljs-attr,
+      .hljs-attribute,
+      .hljs-variable,
+      .hljs-template-variable {
+        color: var(--r1900);
+      }
+      .hljs-meta,
+      .hljs-selector-class,
+      .hljs-selector-id {
+        color: var(--r2100);
+      }
+      .hljs-params {
+        color: var(--text);
+      }
+      .hljs-deletion {
+        color: var(--red);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ═══ 列表视图 ═══ -->
+    <div class="container" id="list-view">
+      <div class="topbar">
+        <div>
+          <h1>CF <span class="accent">Database</span></h1>
+          <div class="sub" id="total-line">加载中...</div>
+        </div>
+        <button class="theme-btn" onclick="toggleTheme()">🎨 主题</button>
+      </div>
+
+      <div class="progress-bar" id="progress-bar">
+        <span id="progress-text">预爬中...</span>
+        <div class="progress-track">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+
+      <div class="filters">
+        <div>
+          <label>Rating 下限</label
+          ><input
+            type="number"
+            id="f-rmin"
+            placeholder="800"
+            min="800"
+            max="3500"
+          />
+        </div>
+        <div>
+          <label>Rating 上限</label
+          ><input
+            type="number"
+            id="f-rmax"
+            placeholder="3500"
+            min="800"
+            max="3500"
+          />
+        </div>
+        <div>
+          <label>解题数 ≥</label
+          ><input type="number" id="f-solved" placeholder="0" />
+        </div>
+        <div>
+          <label>搜索名称</label
+          ><input
+            type="text"
+            id="f-search"
+            placeholder="例如: tree / dp / 1400..."
+          />
+        </div>
+        <div>
+          <label>排序</label>
+          <select id="f-sort">
+            <option value="rating-desc">Rating 降序</option>
+            <option value="rating-asc">Rating 升序</option>
+            <option value="solved-desc">解题数 降序</option>
+            <option value="solved-asc">解题数 升序</option>
+            <option value="id-asc" selected>题号 升序</option>
+            <option value="name-asc">名称</option>
+          </select>
+        </div>
+        <div class="tag-chips" id="tag-chips"></div>
+      </div>
+
+      <div class="stats-line" id="stats-line"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>题号</th>
+            <th>名称</th>
+            <th>Rating</th>
+            <th>解题数</th>
+            <th>标签</th>
+            <th>链接</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="pager" id="pager"></div>
+    </div>
+
+    <!-- ═══ 详情视图 ═══ -->
+    <div id="detail-view">
+      <div class="detail-bar">
+        <button class="back-btn" onclick="goBack()">← 返回</button>
+        <div class="detail-title" id="detail-title"></div>
+        <div class="detail-meta" id="detail-meta"></div>
+        <div class="tabs">
+          <button
+            class="tab on"
+            id="tab-statement"
+            onclick="switchTab('statement')"
+          >
+            📄 题面
+          </button>
+          <button
+            class="tab"
+            id="tab-editorial"
+            onclick="switchTab('editorial')"
+          >
+            📖 题解
+          </button>
+        </div>
+      </div>
+      <div class="reader" id="reader"></div>
+    </div>
+
+    <script>
+      let ALL = [],
+        FILTERED = [];
+      const PAGE = 50;
+      let page = 1;
+      const activeTags = new Set();
+      let currentProblem = null;
+      let tabCache = {}; // { 'statement': {md, html} | null, 'editorial': ... }
+      let currentTab = "statement";
+
+      const $ = (id) => document.getElementById(id);
+      function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+      }
+
+      /* ═══ 数据加载 ═══ */
+      async function load() {
+        try {
+          const r = await fetch("/api/problems");
+          ALL = await r.json();
+          const rated = ALL.filter((p) => p.rating).length;
+          $("total-line").textContent =
+            `共 ${ALL.length} 题（有 rating: ${rated} 题，范围 800-3500）`;
+          buildTagChips();
+          apply();
+          pollProgress();
+        } catch (err) {
+          $("total-line").textContent = "加载失败：" + err;
+        }
+      }
+
+      /* ═══ 预爬进度 ═══ */
+      const STAGE_CN = {
+        meta: "刷新元数据",
+        statements: "预爬题面",
+        editorials: "预爬题解",
+        done: "完成",
+        error: "异常",
+        idle: "空闲",
+      };
+      let lastDone = -1;
+      let lastRefresh = 0;
+
+      /* 静默刷新题目数据（不重置筛选/页码），让列表标记自动更新 */
+      async function refreshData() {
+        try {
+          const r = await fetch("/api/problems");
+          ALL = await r.json();
+          const savedPage = page;
+          apply();
+          page = savedPage;
+          render();
+        } catch (e) {}
+      }
+
+      async function pollProgress() {
+        try {
+          const r = await fetch("/api/progress");
+          const s = await r.json();
+          const bar = $("progress-bar");
+          if (s.stage === "idle" || s.stage === "done") {
+            bar.classList.remove("show");
+          } else {
+            bar.classList.add("show");
+            $("progress-text").textContent =
+              `${STAGE_CN[s.stage] || s.stage}：${s.done}/${s.total}（已爬 ${s.fetched}，已有 ${s.cached}，失败 ${s.failed}）`;
+            $("progress-fill").style.width = s.total
+              ? (s.done / s.total) * 100 + "%"
+              : "0%";
+          }
+          // 进度推进或爬取结束 → 自动刷新列表标记（节流 10s）
+          const busy =
+            s.stage === "meta" ||
+            s.stage === "statements" ||
+            s.stage === "editorials";
+          if (s.done !== lastDone || (busy === false && lastDone !== -1)) {
+            const now = Date.now();
+            if (now - lastRefresh > 10000) {
+              lastRefresh = now;
+              refreshData();
+            }
+          }
+          lastDone = s.done;
+        } catch (e) {}
+        setTimeout(pollProgress, 2000);
+      }
+
+      /* ═══ 标签筛选 ═══ */
+      function buildTagChips() {
+        const counts = {};
+        for (const p of ALL)
+          for (const t of p.tags) counts[t] = (counts[t] || 0) + 1;
+        const box = $("tag-chips");
+        box.replaceChildren();
+        Object.entries(counts)
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([t, c]) => {
+            const chip = el("span", "chip", `${t} (${c})`);
+            chip.dataset.tag = t;
+            chip.onclick = () => toggleTag(chip);
+            box.appendChild(chip);
+          });
+      }
+      function toggleTag(chip) {
+        const t = chip.dataset.tag;
+        if (activeTags.has(t)) {
+          activeTags.delete(t);
+          chip.classList.remove("on");
+        } else {
+          activeTags.add(t);
+          chip.classList.add("on");
+        }
+        apply();
+      }
+
+      /* ═══ 筛选 + 排序 ═══ */
+      function apply() {
+        const rmin = parseInt($("f-rmin").value) || 0;
+        const rmax = parseInt($("f-rmax").value) || 99999;
+        const solved = parseInt($("f-solved").value) || 0;
+        const q = $("f-search").value.trim().toLowerCase();
+        const sort = $("f-sort").value;
+
+        FILTERED = ALL.filter((p) => {
+          if (p.rating && (p.rating < rmin || p.rating > rmax)) return false;
+          if (!p.rating && rmin > 0) return false;
+          if (p.solvedCount < solved) return false;
+          if (activeTags.size && !p.tags.some((t) => activeTags.has(t)))
+            return false;
+          if (
+            q &&
+            !(
+              p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+            )
+          )
+            return false;
+          return true;
+        });
+
+        const cmp = {
+          "rating-desc": (a, b) => (b.rating || -1) - (a.rating || -1),
+          "rating-asc": (a, b) => (a.rating || 99999) - (b.rating || 99999),
+          "solved-desc": (a, b) => b.solvedCount - a.solvedCount,
+          "solved-asc": (a, b) => a.solvedCount - b.solvedCount,
+          "id-asc": (a, b) =>
+            a.contestId - b.contestId || a.index.localeCompare(b.index),
+          "name-asc": (a, b) => a.name.localeCompare(b.name),
+        }[sort];
+        FILTERED.sort(cmp);
+        page = 1;
+        render();
+      }
+
+      /* ═══ 列表渲染 ═══ */
+      function ratingColor(r) {
+        if (!r) return "var(--subtext)";
+        if (r < 1200) return "var(--r900)";
+        if (r < 1400) return "var(--r1200)";
+        if (r < 1600) return "var(--r1400)";
+        if (r < 1900) return "var(--r1600)";
+        if (r < 2100) return "var(--r1900)";
+        if (r < 2400) return "var(--r2100)";
+        if (r < 3000) return "var(--r2400)";
+        return "var(--r3000)";
+      }
+      function fmt(n) {
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
+        if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+        return String(n);
+      }
+      function render() {
+        const line = $("stats-line");
+        line.replaceChildren();
+        line.appendChild(el("span", null, "筛选结果: "));
+        const b = el("b", null, String(FILTERED.length));
+        line.appendChild(b);
+        line.appendChild(el("span", null, " 题"));
+
+        const totalPages = Math.max(1, Math.ceil(FILTERED.length / PAGE));
+        if (page > totalPages) page = totalPages;
+        const slice = FILTERED.slice((page - 1) * PAGE, page * PAGE);
+
+        const tb = $("tbody");
+        tb.replaceChildren();
+        if (!slice.length) {
+          const tr = el("tr");
+          const td = el("td", "empty", "没有匹配的题目");
+          td.colSpan = 6;
+          tr.appendChild(td);
+          tb.appendChild(tr);
+        }
+        for (const p of slice) {
+          const tr = el("tr");
+          tr.onclick = () => showDetail(p);
+          const idTd = el("td", "id", `${p.contestId}${p.index}`);
+          const nameTd = el("td", "name", p.name);
+          if (p.hasSolution) {
+            // 已有解题代码：主题蓝绿色标识
+            idTd.style.color = "var(--teal)";
+            nameTd.style.color = "var(--teal)";
+            nameTd.style.fontWeight = "600";
+            tr.title = "已做过（有解题代码）";
+          }
+          tr.appendChild(idTd);
+          tr.appendChild(nameTd);
+          const rd = el("td", "rating", p.rating ? String(p.rating) : "—");
+          rd.style.color = ratingColor(p.rating);
+          tr.appendChild(rd);
+          tr.appendChild(el("td", "solved", fmt(p.solvedCount)));
+          const tagsTd = el("td", "tags-td");
+          p.tags
+            .slice(0, 4)
+            .forEach((t) => tagsTd.appendChild(el("span", "mini-tag", t)));
+          tr.appendChild(tagsTd);
+          const linkTd = el("td");
+          const a = el("a", "link", "打开 ↗");
+          a.href = p.url;
+          a.target = "_blank";
+          a.onclick = (e) => e.stopPropagation();
+          linkTd.appendChild(a);
+          tr.appendChild(linkTd);
+          tb.appendChild(tr);
+        }
+
+        const pager = $("pager");
+        pager.replaceChildren();
+        const mkBtn = (label, fn, disabled) => {
+          const b = el("button", null, label);
+          b.disabled = !!disabled;
+          b.onclick = fn;
+          pager.appendChild(b);
+          return b;
+        };
+        mkBtn("«", () => go(1), page === 1);
+        mkBtn("‹", () => go(page - 1), page === 1);
+        for (
+          let i = Math.max(1, page - 2);
+          i <= Math.min(totalPages, page + 2);
+          i++
+        ) {
+          const b = mkBtn(String(i), () => go(i), false);
+          if (i === page) b.classList.add("cur");
+        }
+        mkBtn("›", () => go(page + 1), page === totalPages);
+        mkBtn("»", () => go(totalPages), page === totalPages);
+        pager.appendChild(el("span", "info", `${page}/${totalPages}`));
+      }
+      function go(n) {
+        page = n;
+        render();
+      }
+
+      /* ═══ 视图切换 ═══ */
+      function showDetail(p) {
+        if (location.hash !== "#/problem/" + p.id) {
+          try { history.pushState(null, "", "#/problem/" + p.id); } catch (e) {}
+        }
+        currentProblem = p;
+        tabCache = {};
+        currentTab = "statement";
+        $("list-view").style.display = "none";
+        $("detail-view").classList.add("show");
+        $("detail-title").textContent = `${p.contestId}${p.index} — ${p.name}`;
+        $("detail-meta").textContent =
+          `Rating: ${p.rating ?? "—"} · 解题: ${fmt(p.solvedCount)} · ${p.tags.join(" / ")}`;
+        $("tab-statement").classList.add("on");
+        $("tab-editorial").classList.remove("on");
+        loadTab("statement");
+      }
+      /* 按钮返回 = 浏览器后退（同一套 popstate 逻辑） */
+      function goBack() {
+        history.back();
+        // 兜底：直接打开详情 URL（无历史可退）时，back 无效 → 手动回列表
+        setTimeout(() => {
+          if (location.hash.startsWith("#/problem/")) showList();
+        }, 120);
+      }
+      function showList() {
+        try { history.replaceState(null, "", location.pathname); } catch (e) {}
+        currentProblem = null;
+        $("detail-view").classList.remove("show");
+        $("list-view").style.display = "";
+      }
+
+      /* ═══ 标签页：题面 / 题解 ═══ */
+      function switchTab(tab) {
+        if (tab === currentTab) return;
+        currentTab = tab;
+        $("tab-statement").classList.toggle("on", tab === "statement");
+        $("tab-editorial").classList.toggle("on", tab === "editorial");
+        loadTab(tab);
+      }
+      function loadTab(tab) {
+        if (!currentProblem) return;
+        const reader = $("reader");
+        reader.replaceChildren();
+        if (tabCache[tab]) {
+          reader.appendChild(mdFrame(tabCache[tab].md));
+          // 缓存恢复也要渲染题面底部的解题代码
+          if (tab === "statement") renderSolutions(reader);
+          return;
+        }
+        reader.appendChild(el("div", "hint", "加载中..."));
+        if (tab === "editorial") {
+          loadEditorial(reader);
+          return;
+        }
+        fetch(
+          `/api/statement?contestId=${currentProblem.contestId}&index=${currentProblem.index}`,
+        )
+          .then((r) => r.json())
+          .then((d) => {
+            reader.replaceChildren();
+            if (!d.md) {
+              const hint = el(
+                "div",
+                "hint",
+                "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
+              );
+              hint.style.whiteSpace = "pre-line";
+              reader.appendChild(hint);
+              tabCache[tab] = null;
+              return;
+            }
+            tabCache[tab] = { md: d.md };
+            reader.appendChild(mdFrame(d.md));
+            // 题面底部渲染自己的解题代码（无则跳过，不渲染空框）
+            renderSolutions(reader);
+          })
+          .catch((err) => {
+            const d = el("div", "hint", "解题代码加载失败：" + err);
+            d.style.color = "var(--red)";
+            reader.appendChild(d); // 追加提示，不清空题面
+          });
+      }
+
+      /* ═══ CF 官方题解（点击时按需爬取 + 缓存）═══ */
+      function loadEditorial(reader) {
+        fetch(`/api/editorial?contestId=${currentProblem.contestId}`)
+          .then((r) => r.json())
+          .then((d) => {
+            reader.replaceChildren();
+            if (!d.md) {
+              const hint = el(
+                "div",
+                "hint",
+                "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
+              );
+              hint.style.whiteSpace = "pre-line";
+              reader.appendChild(hint);
+              return;
+            }
+            tabCache.editorial = { md: d.md };
+            reader.appendChild(mdFrame(d.md));
+          })
+          .catch((err) => {
+            reader.replaceChildren();
+            const d = el("div", "hint", "题解加载失败：" + err);
+            d.style.color = "var(--red)";
+            reader.appendChild(d);
+          });
+      }
+
+      /* ═══ shiki 高亮（TextMate 语法引擎，CSS 变量主题联动）═══ */
+      const langMap = {
+        rs: "rust", cpp: "cpp", cc: "cpp", cxx: "cpp", c: "c",
+        py: "python", java: "java", go: "go", ts: "typescript",
+        js: "javascript", kt: "kotlin", cs: "csharp", sh: "bash",
+        txt: "plaintext",
+      };
+      const SHIKI_THEME = {
+        name: "cfdb",
+        type: "dark",
+        colors: { "editor.background": "transparent" },
+        tokenColors: [
+          { scope: [],
+            settings: { foreground: "var(--text)" } },
+          { scope: ["keyword", "storage.type", "storage.modifier"],
+            settings: { foreground: "var(--accent2)" } },
+          { scope: ["string", "string.regexp"],
+            settings: { foreground: "var(--teal)" } },
+          { scope: ["comment"],
+            settings: { foreground: "var(--subtext)", fontStyle: "italic" } },
+          { scope: ["entity.name.function", "support.function"],
+            settings: { foreground: "var(--accent)" } },
+          { scope: ["constant.numeric", "constant"],
+            settings: { foreground: "var(--r2400)" } },
+          { scope: ["entity.name.type", "support.type"],
+            settings: { foreground: "var(--r1900)" } },
+          { scope: ["meta", "keyword.other"],
+            settings: { foreground: "var(--r2100)" } },
+        ],
+      };
+      let shikiModule = null;
+      async function highlightShiki(pre, code, lang) {
+        try {
+          if (!shikiModule) {
+            // 本地 shiki（importmap → /npm/ 依赖树），失败回退本地 hljs
+            shikiModule = import("shiki/bundle/full");
+          }
+          const { codeToHtml } = await shikiModule;
+          const html = await codeToHtml(code.textContent, {
+            lang: lang,
+            theme: SHIKI_THEME,
+          });
+          const parsed = new DOMParser().parseFromString(html, "text/html");
+          const node = parsed.body.firstElementChild;
+          if (node) pre.replaceWith(node); // 替换为高亮后的 <pre>
+          return; // shiki 成功
+        } catch (e) {
+          // 回退：本地 hljs（零网络依赖）
+          try {
+            if (window.hljs) {
+              code.className = "language-" + lang;
+              hljs.highlightElement(code);
+            }
+          } catch (e2) {
+            /* 保持纯文本 */
+          }
+        }
+      }
+
+      /* ═══ 解题代码渲染（题面底部追加；无文件则不渲染）═══ */
+      function renderSolutions(reader) {
+        fetch(
+          `/api/solution?contestId=${currentProblem.contestId}&index=${currentProblem.index}`,
+        )
+          .then((r) => r.json())
+          .then((d) => {
+            const files = d.files || [];
+            if (!files.length) return; // 无代码：不渲染任何东西
+            const head = el("h2", null, "💻 我的解题代码");
+            head.style.margin = "30px 0 10px";
+            head.style.color = "var(--accent)";
+            reader.appendChild(head);
+            const langName = {
+              rs: "Rust", cpp: "C++", cc: "C++", cxx: "C++", c: "C",
+              py: "Python", java: "Java", go: "Go", ts: "TypeScript",
+              js: "JavaScript", kt: "Kotlin",
+            };
+            files.forEach((f) => {
+              const head = el("h3", null, `📄 ${f.name}  (${langName[f.ext] || f.ext})`);
+              head.style.margin = "24px 0 10px";
+              head.style.color = "var(--accent)";
+              reader.appendChild(head);
+              const pre = el("pre");
+              pre.style.cssText =
+                "background:var(--surface);border:1px solid var(--border);" +
+                "border-radius:10px;padding:16px 18px;overflow:auto;" +
+                "font:13.5px/1.6 'JetBrains Mono','Fira Code',Consolas,monospace;white-space:pre;";
+              const code = el("code");
+              code.textContent = f.content;
+              pre.appendChild(code);
+              reader.appendChild(pre);
+              highlightShiki(pre, code, langMap[f.ext] || "plaintext");
+            });
+          })
+          .catch((err) => {
+            reader.replaceChildren();
+            const d = el("div", "hint", "加载失败：" + err);
+            d.style.color = "var(--red)";
+            reader.appendChild(d);
+          });
+      }
+
+      /* ═══ md → iframe（阅读排版，无边框无滚动条，高度自适应）═══ */
+      function themeColors() {
+        const cs = getComputedStyle(document.documentElement);
+        const pick = (v) => cs.getPropertyValue(v).trim();
+        return {
+          bg: pick("--bg"),
+          surface: pick("--surface"),
+          text: pick("--text"),
+          accent: pick("--accent"),
+          border: pick("--border"),
+        };
+      }
+      const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
+      const sansStack = '"Noto Sans SC", "PingFang SC", sans-serif';
+
+      function mdFrame(md) {
+        let html;
+        try {
+          html = window.marked ? marked.parse(md) : null;
+        } catch (e) {
+          html = null;
+        }
+        if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
+        html = html.replace(/<\/script/gi, "&lt;/script");
+        // 题面标题（首个 h1）右侧加"打开"原题链接
+        const url = currentProblem ? currentProblem.url : "";
+        html = html.replace(
+          /<h1>([\s\S]*?)<\/h1>/,
+          `<h1>$1 <a class="open" href="${url}" target="_blank">打开 ↗</a></h1>`,
+        );
+        const c = themeColors();
+        const frame = el("iframe", "statement-frame");
+        frame.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>
+body { background:transparent; color:${c.text}; margin:0; overflow:hidden;
+  font:15.5px/1.9 ${serifStack}; }
+p { margin: 10px 0; }
+pre { background:${c.surface}; border:1px solid ${c.border}; border-radius:8px;
+  padding:14px 16px; overflow:hidden; white-space:pre-wrap; word-break:break-word;
+  font:13.5px/1.6 "JetBrains Mono","Fira Code",Consolas,monospace; }
+code { background:${c.surface}; padding:1px 6px; border-radius:4px; font-size:13.5px; }
+pre code { background:none; padding:0; }
+h1 { font-size:21px; margin:6px 0 14px; font-family:${sansStack}; }
+.open { font-size:13px; font-weight:400; color:${c.accent}; text-decoration:none;
+  margin-left:12px; font-family:${sansStack}; vertical-align:middle; }
+.open:hover { text-decoration:underline; }
+h2 { font-size:17px; color:${c.accent}; margin:22px 0 8px; font-family:${sansStack}; }
+h3 { font-size:15.5px; margin:18px 0 6px; }
+a { color:${c.accent}; }
+hr { border:none; border-top:1px solid ${c.border}; margin:18px 0; }
+ul,ol { padding-left: 24px; margin: 8px 0; }
+li { margin: 4px 0; }
+blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px; color:#889; }
+</style>
+<script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]}};<\/script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async><\/script>
+</head><body><div id="md">${html}</div>
+<script>
+function syncH(){parent.postMessage({cfdbH:document.body.scrollHeight},'*')}
+if(window.MathJax){MathJax.typesetPromise().then(syncH).catch(syncH)}else{syncH()}
+setTimeout(syncH, 800);setTimeout(syncH, 3000);
+<\/script>
+</body></html>`;
+        frame.onload = () => {
+          try {
+            frame.style.height = frame.contentDocument.body.scrollHeight + "px";
+          } catch (e) {}
+        };
+        return frame;
+      }
+      window.addEventListener("message", (e) => {
+        if (e.data && e.data.cfdbH) {
+          const f = document.querySelector(".statement-frame");
+          if (f) f.style.height = e.data.cfdbH + "px";
+        }
+      });
+
+      /* ═══ 主题 ═══ */
+      function toggleTheme() {
+        const cur = document.documentElement.dataset.theme;
+        document.documentElement.dataset.theme =
+          cur === "catppuccin" ? "gruvbox" : "catppuccin";
+        localStorage.setItem(
+          "cfdb-theme",
+          document.documentElement.dataset.theme,
+        );
+      }
+      (function () {
+        const saved = localStorage.getItem("cfdb-theme");
+        if (saved) document.documentElement.dataset.theme = saved;
+      })();
+
+      /* 事件绑定 */
+      ["f-rmin", "f-rmax", "f-solved", "f-search"].forEach((id) =>
+        $(id).addEventListener("input", apply),
+      );
+      $("f-sort").addEventListener("change", apply);
+
+      function parseHash() {
+        const m = location.hash.match(/#\/problem\/(\d+)([A-Za-z]+)/);
+        if (m) {
+          const p = ALL.find(x => x.contestId === Number(m[1]) && x.index === m[2].toUpperCase());
+          if (p) showDetail(p);
+        }
+      }
+      window.addEventListener("hashchange", parseHash);
+      // 浏览器前进/后退：popstate 触发（pushState 不触发 hashchange）
+      window.addEventListener("popstate", () => {
+        if (location.hash.startsWith("#/problem/")) {
+          parseHash(); // 前进/后退到详情
+        } else {
+          showList();  // 后退回列表
+        }
+      });
+      load().then(parseHash);
+    </script>
+  </body>
+</html>

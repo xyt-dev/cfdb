@@ -1,0 +1,13 @@
+# 爬取数据（update.py 可再生成，不入库）
+statements/
+editorials/
+problems.json
+failed_statements.json
+
+# 依赖与运行时产物
+node_modules/
+__pycache__/
+*.pyc
+
+# 本地临时
+*.log
