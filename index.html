@@ -7,10 +7,47 @@
     <script src="/vendor/marked.min.js"></script>
     <script src="/vendor/highlight.min.js"></script>
     <style>
+      /* ═══ CodeNewRoman Nerd Font（本地，零 CDN）═══ */
+      @font-face {
+        font-family: "CodeNewRoman Nerd Font";
+        src: url("/vendor/CodeNewRomanNerdFont-Regular.otf") format("opentype");
+        font-weight: 400;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "CodeNewRoman Nerd Font";
+        src: url("/vendor/CodeNewRomanNerdFont-Bold.otf") format("opentype");
+        font-weight: 700;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "CodeNewRoman Nerd Font";
+        src: url("/vendor/CodeNewRomanNerdFont-Italic.otf") format("opentype");
+        font-weight: 400;
+        font-style: italic;
+      }
+      @font-face {
+        font-family: "CodeNewRoman Nerd Font Mono";
+        src: url("/vendor/CodeNewRomanNerdFontMono-Regular.otf") format("opentype");
+        font-weight: 400;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "CodeNewRoman Nerd Font Mono";
+        src: url("/vendor/CodeNewRomanNerdFontMono-Bold.otf") format("opentype");
+        font-weight: 700;
+        font-style: normal;
+      }
+      @font-face {
+        font-family: "CodeNewRoman Nerd Font Mono";
+        src: url("/vendor/CodeNewRomanNerdFontMono-Italic.otf") format("opentype");
+        font-weight: 400;
+        font-style: italic;
+      }
       :root {
         --radius: 10px;
-        --sans: "Noto Sans SC", "PingFang SC", sans-serif;
-        --serif: Georgia, "Noto Serif SC", "Songti SC", serif;
+        --sans: "CodeNewRoman Nerd Font", "Noto Sans SC", "PingFang SC", sans-serif;
+        --serif: "CodeNewRoman Nerd Font", Georgia, "Noto Serif SC", "Songti SC", serif;
       }
       /* ═══ Catppuccin Mocha ═══ */
       [data-theme="catppuccin"] {
@@ -81,6 +118,7 @@
         color: var(--subtext);
         font-size: 13px;
         margin-bottom: 16px;
+        min-height: 20px; /* 冗余高度：中英切换不影响布局 */
       }
 
       .topbar {
@@ -106,6 +144,9 @@
         display: flex;
         gap: 10px;
       }
+      #theme-btn {
+        width: 118px; /* 冗余宽度：不受「🎨 Theme/🎨 主题」长度影响 */
+      }
 
       /* 爬取进度条 */
       .progress-bar {
@@ -119,6 +160,7 @@
         display: none;
         align-items: center;
         gap: 10px;
+        min-height: 40px; /* 冗余高度：中英切换不影响布局 */
       }
       .progress-bar.show {
         display: flex;
@@ -154,6 +196,13 @@
         font-size: 12px;
         color: var(--subtext);
         margin-bottom: 4px;
+        white-space: nowrap; /* 防中英切换换行 */
+        height: 16px; /* 固定高度：中英文字行高差异不影响 */
+        line-height: 16px;
+        overflow: hidden;
+      }
+      .filters > div {
+        min-height: 58px; /* 冗余高度：中英切换不影响整体高度 */
       }
       .filters input,
       .filters select {
@@ -164,6 +213,7 @@
         border-radius: 6px;
         padding: 7px 9px;
         font-size: 13px;
+        height: 34px; /* 固定高度：中英占位符/选项不影响组件尺寸 */
       }
       .filters input:focus,
       .filters select:focus {
@@ -211,6 +261,7 @@
         color: var(--subtext);
         font-size: 13px;
         margin-bottom: 10px;
+        min-height: 20px; /* 冗余高度：中英切换不影响布局 */
       }
       .stats-line b {
         color: var(--accent);
@@ -219,8 +270,11 @@
         position: absolute;
         top: 10px;
         right: 10px;
-        width: auto;
-        padding: 2px 9px;
+        width: 88px; /* 固定宽度：Default/默认 切换不变 */
+        text-align: center;
+        height: 24px; /* 固定高度：中英字体行高差异不影响 */
+        line-height: 22px;
+        padding: 0 9px;
         font-size: 12px;
         border-radius: 5px;
         background: transparent;
@@ -246,6 +300,8 @@
         color: var(--subtext);
         background: var(--surface2);
         white-space: nowrap;
+        height: 38px; /* 固定高度（table-cell 语义=最小高度）：中英切换不影响表头 */
+        vertical-align: middle;
       }
       tbody tr {
         border-top: 1px solid var(--border);
@@ -259,11 +315,24 @@
         padding: 9px 12px;
         font-size: 13px;
         vertical-align: middle;
+        line-height: 24px; /* 冗余行高：内容行盒富余，垂直位置稳定 */
+      }
+      tbody tr {
+        height: 44px; /* 冗余行高（9px×2 + 24px + 2px 富余）：行内字符上下位置不受语言/字体度量影响 */
       }
       .id {
         font-family: monospace;
         color: var(--accent);
         white-space: nowrap;
+        width: 96px; /* 冗余宽度：列宽固定，不受 ID 长度影响 */
+      }
+      .link-td {
+        width: 88px; /* 冗余宽度：不受「打开 ↗/Open ↗」长度影响 */
+        white-space: nowrap;
+      }
+      .link-td .link {
+        display: inline-block;
+        width: 72px; /* 固定宽度：中英链接文字位置稳定 */
       }
       .name {
         max-width: 340px;
@@ -271,6 +340,7 @@
       .rating {
         font-weight: 700;
         white-space: nowrap;
+        width: 80px; /* 冗余宽度：不受「800/3500/—」长度影响 */
       }
       .solved {
         font-family: monospace;
@@ -279,11 +349,18 @@
       .tags-td {
         max-width: 380px;
       }
+      .tags-wrap {
+        display: flex;
+        align-items: center; /* 中心对齐：不依赖字体基线/x-height，零抖动 */
+        flex-wrap: wrap;
+        gap: 6px;
+        height: 100%;
+      }
       .mini-tag {
         display: inline-block;
         font-size: 11px;
         color: var(--subtext);
-        margin-right: 6px;
+        line-height: 1;
       }
       .link {
         color: var(--accent);
@@ -362,6 +439,10 @@
         padding: 7px 14px;
         cursor: pointer;
         font-size: 13px;
+        height: 34px; /* 固定高度：中英文字行高差异不影响 */
+        line-height: 20px;
+        width: 116px; /* 固定宽度：← Back / ← 返回 切换不影响后续元素位置 */
+        text-align: center;
       }
       .back-btn:hover {
         border-color: var(--accent);
@@ -375,6 +456,10 @@
       .detail-meta {
         font-size: 12px;
         color: var(--subtext);
+        max-width: 340px;
+        white-space: nowrap; /* 单行：中英长度差异不引发换行/高度变化 */
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .tabs {
         display: flex;
@@ -388,6 +473,10 @@
         padding: 7px 18px;
         cursor: pointer;
         font-size: 13px;
+        height: 34px; /* 固定高度：中英文字行高差异不影响 */
+        line-height: 20px;
+        width: 116px; /* 固定宽度：← Back / ← 返回 切换不影响后续元素位置 */
+        text-align: center;
       }
       .tab.on {
         background: var(--accent);
@@ -481,7 +570,7 @@
         </div>
         <div class="topbar-btns">
           <button class="theme-btn" id="lang-btn" onclick="toggleLang()">文</button>
-          <button class="theme-btn" onclick="toggleTheme()" data-i18n="theme">Theme</button>
+          <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" data-i18n="theme">Theme</button>
         </div>
       </div>
 
@@ -600,7 +689,7 @@
         en: {
           title: "CF Database — Codeforces Problem Library",
           loading: "Loading...",
-          theme: "Theme",
+          theme: "🎨 Theme",
           preCrawling: "Pre-crawling...",
           reset: "Default",
           resetTitle: "Reset filters",
@@ -659,14 +748,14 @@
           preCrawling: "预爬中...",
           reset: "默认",
           resetTitle: "恢复默认筛选",
-          ratingMin: "Rating 下限",
-          ratingMax: "Rating 上限",
+          ratingMin: "分数下限",
+          ratingMax: "分数上限",
           solvedAtLeast: "解题数 ≥",
           search: "搜索名称",
           searchPh: "例如: tree / dp / 1400...",
           sort: "排序",
-          ratingDesc: "Rating 降序",
-          ratingAsc: "Rating 升序",
+          ratingDesc: "分数降序",
+          ratingAsc: "分数升序",
           solvedDesc: "解题数 降序",
           solvedAsc: "解题数 升序",
           idAsc: "题号 升序",
@@ -674,14 +763,14 @@
           nameAsc: "名称",
           colId: "题号",
           colName: "名称",
-          colRating: "Rating",
+          colRating: "分数",
           colSolved: "解题数",
           colTags: "标签",
           colLink: "链接",
           back: "← 返回",
           tabStatement: "📄 题面",
           tabEditorial: "📖 题解",
-          totalLine: "共 {n} 题（有 rating: {r} 题，范围 800-3500）",
+          totalLine: "共 {n} 题（有分数标注: {r} 题，范围 800-3500）",
           filtered: "筛选结果: ",
           problems: " 题",
           noMatch: "没有匹配的题目",
@@ -694,7 +783,7 @@
           stageError: "异常",
           stageIdle: "空闲",
           progress: "{stage}：{done}/{total}（已爬 {fetched}，已有 {cached}，失败 {failed}）",
-          detailMeta: "Rating: {r} · 解题: {s} · {tags}",
+          detailMeta: "分数: {r} · 解题: {s} · {tags}",
           readerLoading: "加载中...",
           noStatement: "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
           loadFail: "加载失败：",
@@ -1044,11 +1133,13 @@
           tr.appendChild(rd);
           tr.appendChild(el("td", "solved", fmt(p.solvedCount)));
           const tagsTd = el("td", "tags-td");
+          const tagsWrap = el("div", "tags-wrap");
           p.tags
             .slice(0, 4)
-            .forEach((t) => tagsTd.appendChild(el("span", "mini-tag", t)));
+            .forEach((t) => tagsWrap.appendChild(el("span", "mini-tag", t)));
+          tagsTd.appendChild(tagsWrap);
           tr.appendChild(tagsTd);
-          const linkTd = el("td");
+          const linkTd = el("td", "link-td");
           const a = el("a", "link", t("open"));
           a.href = p.url;
           a.target = "_blank";
@@ -1255,7 +1346,7 @@
               pre.style.cssText =
                 "background:var(--surface);border:1px solid var(--border);" +
                 "border-radius:10px;padding:16px 18px;overflow:auto;" +
-                "font:13.5px/1.6 'JetBrains Mono','Fira Code',Consolas,monospace;white-space:pre;";
+                "font:13.5px/1.6 \"CodeNewRoman Nerd Font Mono\",'JetBrains Mono','Fira Code',Consolas,monospace;white-space:pre;";
               const code = el("code");
               code.textContent = f.content;
               pre.appendChild(code);
@@ -1295,8 +1386,9 @@
           r2100: pick("--r2100"),
         };
       }
-      const serifStack = 'Georgia, "Noto Serif SC", "Songti SC", serif';
-      const sansStack = '"Noto Sans SC", "PingFang SC", sans-serif';
+      const serifStack = '"CodeNewRoman Nerd Font", Georgia, "Noto Serif SC", "Songti SC", serif';
+      const sansStack = '"CodeNewRoman Nerd Font", "Noto Sans SC", "PingFang SC", sans-serif';
+      const monoStack = '"CodeNewRoman Nerd Font Mono", "JetBrains Mono", "Fira Code", Consolas, monospace';
 
       /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h4），
          统一渲染为 h2 + 前后分割线；标题本身链接到原题（titleLink 回调） */
@@ -1411,8 +1503,8 @@ body { background:transparent; color:${c.text}; margin:0; overflow:hidden;
 p { margin: 10px 0; }
 pre { background:${c.surface}; border:1px solid ${c.border}; border-radius:8px;
   padding:14px 16px; overflow:hidden; white-space:pre-wrap; word-break:break-word;
-  font:13.5px/1.6 "JetBrains Mono","Fira Code",Consolas,monospace; }
-code { background:${c.surface}; padding:1px 6px; border-radius:4px; font-size:13.5px; }
+  font:13.5px/1.6 ${monoStack}; }
+code { background:${c.surface}; padding:1px 6px; border-radius:4px; font-size:13.5px; font-family:${monoStack}; }
 pre code { background:none; padding:0; }
 h1 { font-size:21px; margin:6px 0 14px; font-family:${sansStack}; }
 /* 右上角「打开 ↗」（fixed 相对 iframe 视口） */

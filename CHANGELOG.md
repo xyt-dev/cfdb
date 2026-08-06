@@ -6,8 +6,12 @@
 
 ### 新增
 
+- **强制使用 CodeNewRoman Nerd Font**：本地 otf（vendor/，零 CDN）——正文比例版 + 代码等宽 Mono 版（Regular/Bold/Italic 6 个 @font-face）；主页面、srcdoc 阅读区、solutions 代码块全覆盖；`/vendor/` 路由补 font/otf content-type
 - **i18n 全页面中英切换**：默认英文；「文/En」按钮位于主题按钮左侧（localStorage 记忆）；覆盖静态文本（筛选标签/排序/表头/tab/按钮）、动态文本（进度条/筛选统计/hint/详情元数据）与 srcdoc 内容（打开 ↗/图片占位）；详情页内切换即时重建当前 tab
 - **恢复默认按钮**：从迷你图标 `↺` 改为文字「Default/默认」（随语言切换）
+- **排序新增「ID 降序」**：contestId + index 双字段降序（`ID ↓` / `题号 降序`，中英双语）
+- **Rating i18n**：中文界面 Rating 译为「分数」（表头/筛选标签/统计/详情元数据/排序选项），英文保留 Rating（`colRating` 双字典同文本曾误替换，已修）
+- **布局稳定性**：filter 单元冗余高度（min-height 58px + label 固定高 16px 防换行）、filter 组件固定尺寸（input/select 高 34px、reset 按钮 24×88px）、链接列文字固定宽度 72px（打开 ↗/Open ↗ 切换整行文字位置稳定）、列表行冗余行高（tr 44px + td line-height 24px——字符垂直位置完全稳定）、标签列改 flex 容器（align-items: center——垂直中心对齐零依赖字体基线/x-height，字体 fallback 与中英切换均零抖动）；详情栏稳定（meta 单行省略、back 按钮 34×116px、tab 按钮 34px 固定）；「共多少题」与「筛选结果」行冗余高度（min-height 20px）；爬取进度框冗余高度（min-height 40px）；表头行固定高度 38px（table-cell 的 min-height 无效，用 height 语义 + 垂直居中）；ID 列 96px、分数列 80px、链接列 88px、主题按钮 118px 均固定宽度——中英切换高度/宽度零跳动；主题按钮双语均带 🎨 图标
 
 ## [v2.1.0] - 2026-08-06
 

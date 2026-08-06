@@ -128,7 +128,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             vpath = os.path.join(ROOT, "vendor", name)
             try:
                 with open(vpath, "rb") as f:
-                    ctype = "application/javascript" if name.endswith(".js") else "application/octet-stream"
+                    if name.endswith(".js"):
+                        ctype = "application/javascript"
+                    elif name.endswith((".otf", ".ttf")):
+                        ctype = "font/otf" if name.endswith(".otf") else "font/ttf"
+                    else:
+                        ctype = "application/octet-stream"
                     self._send(200, f.read(), ctype)
             except OSError:
                 self._send(404, b"not found", "text/plain")
