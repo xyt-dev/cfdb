@@ -225,6 +225,71 @@ def read_editorial_url(cid) -> str | None:
     return None
 
 
+def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
+    """通过 /data/problemTutorial API 获取动态 per-problem 题解。
+    返回 {problemCode: markdown 内容}（去掉自带标题，避免与占位标题重复）"""
+    import tempfile
+    jar = os.path.join(tempfile.gettempdir(), f"cfdb-{cid}.cookies")
+    try:
+        os.remove(jar)
+    except OSError:
+        pass
+    # 1. GET 第一题页面拿会话 cookie + csrf token
+    idx0 = codes[0][len(cid):]
+    page = subprocess.run(
+        [CURL, "-s", "-c", jar, "--max-time", "20",
+         "-H", f"User-Agent: {UA}",
+         f"https://codeforces.com/contest/{cid}/problem/{idx0}"],
+        capture_output=True, timeout=30).stdout.decode("utf-8", "replace")
+    m = re.search(r"data-csrf='([a-f0-9]+)'", page)
+    if not m:
+        return {}
+    token = m.group(1)
+    # 2. 逐个 POST problemCode
+    out = {}
+    for code in codes:
+        try:
+            r = subprocess.run(
+                [CURL, "-s", "-b", jar, "-c", jar, "-X", "POST", "--max-time", "20",
+                 "-H", f"User-Agent: {UA}",
+                 "-H", "X-Requested-With: XMLHttpRequest",
+                 "-H", f"X-Csrf-Token: {token}",
+                 "--data", f"problemCode={code}",
+                 "https://codeforces.com/data/problemTutorial"],
+                capture_output=True, timeout=30)
+            d = json.loads(r.stdout)
+            if d.get("success") in (True, "true") and d.get("html"):
+                tmd = html2md.editorial_to_md(d["html"])
+                # 去掉自带标题行（占位标题已存在）
+                lines = tmd.split("\n")
+                if lines and lines[0].startswith("#"):
+                    tmd = "\n".join(lines[1:]).strip()
+                if tmd:
+                    out[code] = tmd
+        except Exception:
+            pass
+        time.sleep(0.3)  # 限速防反爬
+    return out
+
+
+def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
+    """把该题的 'Tutorial is loading...' 占位替换为真实题解。
+    精确匹配题号（如 A1）；失败则用首字母 fallback（如 problemCode=F3 但标题是 F）"""
+    pat = re.compile(
+        r'(\*\*[^*\n]*' + re.escape(idx) + r'[^*\n]*\*\*)\n+Tutorial is loading\.\.\.',
+        re.S)
+    m = pat.search(md)
+    if not m:
+        letter = idx[0]
+        pat2 = re.compile(
+            r'(\*\*[^*\n]*\b' + re.escape(letter) + r'\b[^*\n]*\*\*)\n+Tutorial is loading\.\.\.',
+            re.S)
+        m = pat2.search(md)
+    if m:
+        return md[:m.start()] + m.group(1) + "\n\n" + tmd + md[m.end():]
+    return md
+
+
 def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     """爬取比赛题解转 md 并缓存（contest 页找 editorial 链接 → 爬博客）"""
     contest_url = f"https://codeforces.com/contest/{cid}"
@@ -241,7 +306,19 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     blog_html = fetch_url(link)
     if not blog_html:
         return None
+    # 收集动态加载的 per-problem tutorial 占位
+    codes = []
+    if '<div class="problemTutorial"' in blog_html:
+        codes = re.findall(r'problemcode="([^"]+)"', blog_html)
     md = html2md.editorial_to_md(blog_html)
+    # md 层替换占位符为真实题解（避免 HTML 层 ttypography 嵌套截断）
+    if codes and "Tutorial is loading" in md:
+        tutorials = _fetch_problem_tutorials(cid, codes)
+        for code, tmd in tutorials.items():
+            idx = code[len(cid):]  # "1970A1" → "A1"
+            md = _replace_tutorial(md, idx, tmd)
+            if "Tutorial is loading" not in md:
+                break
     if not md.strip():
         return None
     md = _embed_images(md, f"{cid}", EDITORIAL_IMAGE_DIR, "eimages")  # 下载题解图片
