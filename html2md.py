@@ -118,7 +118,7 @@ class Html2Md(HTMLParser):
                 self.li_level += 1
                 self._nl()
                 self.out.append("  " * (self.li_level - 1) + "- ")
-            elif tag.startswith("h"):
+            elif tag.startswith("h") and len(tag) == 2 and tag[1].isdigit():
                 level = int(tag[1])
                 self._nl()
                 self.out.append("#" * level + " ")
@@ -315,6 +315,13 @@ def _extract_div(html_text: str, target_class: str) -> str:
     return "".join(ex.parts)
 
 
+
+
+# CF 题解博客的 Feedback 投票组件（标准 6 选项，爬取无价值）
+_FEEDBACK_RE = re.compile(
+    r"\*\*Feedback\*\*\s*\n+(?:- (?:Didn't attempt|Great problem|Nice problem|OK problem|Bad problem|Terrible problem) \* \*\s*\n+)+"
+)
+
 def editorial_to_md(html_text: str) -> str:
     """博客题解转 markdown：只取第一个 .ttypography（正文）。
     CF 博客中每个评论也是独立 ttypography 容器，且页面 div 常未闭合
@@ -327,7 +334,10 @@ def editorial_to_md(html_text: str) -> str:
         src = html_text  # 兜底：全文
     p = Html2Md()
     p.feed(src)
-    return _normalize_math(_clean(p.out))
+    md = _normalize_math(_clean(p.out))
+    # 过滤 Feedback 投票小节（CF 标准 6 选项组件，无价值）
+    md = _FEEDBACK_RE.sub("", md)
+    return md
 
 
 # 页脚垃圾标记（提取失败 fallback 全文时裁剪）

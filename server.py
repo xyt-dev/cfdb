@@ -189,8 +189,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
+    try:
         sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, OSError):
+        pass
     print(f"cfdb 服务器启动: http://localhost:{PORT}", flush=True)
     try:
         import socket
