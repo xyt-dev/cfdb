@@ -107,6 +107,8 @@ def _embed_images(md: str, prefix: str, img_dir: str, url_prefix: str) -> str:
     url_prefix: md 中使用的相对路径前缀"""
     import re
     for i, url in enumerate(re.findall(r"!\[[^\]]*\]\(([^)]+)\)", md), 1):
+        if not url.startswith(("http://", "https://")):
+            continue  # 非 http(s) 引用跳过（防异常 URL）
         local = _download_image(url, f"{prefix}_{i}", img_dir)
         if local:
             md = md.replace(f"({url})", f"({url_prefix}/{os.path.basename(local)})")
@@ -125,6 +127,8 @@ def read_statement_md(cid, idx) -> str | None:
 
 def fetch_statement_md(cid, idx, retries: int = 3, timeout: int = 30) -> str | None:
     """爬取题面转 md 并缓存 —— 仅 update.py 预爬使用"""
+    if not (str(cid).isdigit() and str(idx).isalpha()):
+        return None  # 非法参数直接失败，不触发网络请求
     url = f"https://codeforces.com/contest/{cid}/problem/{idx}"
     html = fetch_url(url, timeout=timeout, retries=retries)
     if not html or not _valid_statement(html):
@@ -208,6 +212,10 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     contest_url = f"https://codeforces.com/contest/{cid}"
     contest_html = fetch_url(contest_url, timeout=timeout, retries=retries)
     if not contest_html:
+        return None
+    # 404/不存在的比赛页检测（避免把错误页当正常处理）
+    if ("Contest not found" in contest_html or "does not exist" in contest_html
+            or "Just a moment" in contest_html):
         return None
     link = _find_editorial_link(contest_html)
     if not link:

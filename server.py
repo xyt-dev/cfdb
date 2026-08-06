@@ -65,6 +65,14 @@ def auto_update():
         traceback.print_exc()
 
 
+def _valid_ref(cid: str, idx: str) -> bool:
+    """题号参数校验：contestId 为 1-6 位数字，index 为 1-3 位字母"""
+    return (
+        cid.isdigit() and 0 < len(cid) <= 6
+        and idx.isalpha() and 0 < len(idx) <= 3
+    )
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # 静默日志
@@ -91,6 +99,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 with open(os.path.join(ROOT, u.path[1:]), "rb") as f:
                     self._send(200, f.read(), "text/html; charset=utf-8")
+            except OSError:
+                self._send(404, b"not found", "text/plain")
+        elif u.path.startswith("/eimages/") or u.path.startswith("/images/"):
+            # 题面/题解图片（content-type 按扩展名）
+            base = cfcrawl.EDITORIAL_IMAGE_DIR if u.path.startswith("/eimages/") else cfcrawl.IMAGE_DIR
+            rel = u.path.split("/", 2)[2]
+            img_path = os.path.join(base, os.path.basename(rel))
+            ext = os.path.splitext(img_path)[1].lower()
+            ctype = {
+                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+            }.get(ext, "application/octet-stream")
+            try:
+                with open(img_path, "rb") as f:
+                    self._send(200, f.read(), ctype)
             except OSError:
                 self._send(404, b"not found", "text/plain")
         elif u.path.startswith("/vendor/"):
@@ -122,18 +145,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif u.path == "/api/statement":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]
-            md = cfcrawl.read_statement_md(cid, idx)
-            self._send(200, json.dumps({"md": md}).encode(), "application/json")
+            if not _valid_ref(cid, idx):
+                self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
+            else:
+                md = cfcrawl.read_statement_md(cid, idx)
+                self._send(200, json.dumps({"md": md}).encode(), "application/json")
         elif u.path == "/api/progress":
             self._send(200, json.dumps(crawl_state).encode(), "application/json")
         elif u.path == "/api/editorial":
             q = urllib.parse.parse_qs(u.query)
             cid = q.get("contestId", [""])[0]
-            md = cfcrawl.read_editorial_md(cid) or cfcrawl.fetch_editorial_md(cid)
-            self._send(200, json.dumps({"md": md}).encode(), "application/json")
+            if not (cid.isdigit() and 0 < len(cid) <= 6):
+                self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
+            else:
+                md = cfcrawl.read_editorial_md(cid) or cfcrawl.fetch_editorial_md(cid)
+                self._send(200, json.dumps({"md": md}).encode(), "application/json")
         elif u.path == "/api/solution":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]
+            if not _valid_ref(cid, idx):
+                self._send(400, json.dumps({"files": [], "error": "invalid ref"}).encode(), "application/json")
+                return
             files = cfcrawl.list_solutions(cid, idx)
             for f in files:
                 f["content"] = cfcrawl.read_solution(f["name"]) or ""

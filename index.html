@@ -1145,6 +1145,10 @@ document.querySelectorAll('pre code').forEach(function(el){
     }
   } catch(e) {}
 });
+/* 图片加载失败：隐藏破图图标 */
+document.addEventListener('error', function(e){
+  if (e.target && e.target.tagName === 'IMG') e.target.style.display = 'none';
+}, true);
 /* 所有链接强制新标签打开（防止 iframe 内导航渲染） */
 document.addEventListener('click', function(e){
   var a = e.target.closest('a');
