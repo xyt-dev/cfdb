@@ -1702,10 +1702,30 @@ document.querySelectorAll('#md > p').forEach(function(p){
   });
   if (open) flush();
 })();
-/* 折叠块展开时重新 typeset 公式（隐藏时 MathJax 无法测量布局） */
+/* ═══ iframe 高度自动同步（根本解决）：MutationObserver 监听内容变化，
+   折叠展开/图片加载/公式渲染/代码高亮一律触发——不再依赖逐个事件 ═══ */
+var _syncTimer = null;
+function scheduleSync() {
+  if (_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(syncH, 120); // 防抖：多次变化只同步一次
+}
+new MutationObserver(scheduleSync).observe(document.getElementById('md'), {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: ['open', 'style', 'src', 'class'], // 折叠/图片/样式相关
+  characterData: true,
+});
+/* 图片加载完成（尺寸变化无 DOM 事件） */
+document.querySelectorAll('img').forEach(function (im) {
+  if (!im.complete) im.addEventListener('load', scheduleSync);
+});
+/* 字体就绪（CodeNewRoman 加载后度量变化） */
+if (document.fonts) document.fonts.ready.then(scheduleSync);
+/* 折叠展开时仍需 typeset 公式（高度由 MutationObserver 自动同步） */
 document.addEventListener('toggle', function (e) {
   if (e.target && e.target.tagName === 'DETAILS' && e.target.open && window.MathJax) {
-    MathJax.typesetPromise([e.target]);
+    MathJax.typesetPromise([e.target]).catch(function () {});
   }
 });
 /* 代码块语法高亮：仅带语言标注的高亮；裸代码块（样例等）保持纯文本 */

@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **iframe 高度同步根本解决**：折叠块展开后代码框超出底部不可见（事件驱动 syncH 有遗漏）→ srcdoc 改用 **MutationObserver 监听内容变化**（折叠/公式 SVG/代码高亮/图片 load/字体就绪一律自动防抖同步高度）——不再依赖逐个事件
+
+
+
 ### 新增
 
 - **样例/代码框复制按钮**：hover 显示，Nerd Font 图标（复制 U+F0C5 / 完成 U+F00C）正方形按钮、主题 accent 色、透明背景（hover 才 surface2）；兼容所有浏览器（clipboard API 安全上下文 → execCommand fallback 局域网 http）；`themeColors` 补 surface2（缺失导致按钮白底）；**本地解题代码块复用同一复制逻辑**（`attachCopyButton`）
