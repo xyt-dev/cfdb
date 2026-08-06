@@ -167,9 +167,17 @@ def _fetch_statement_pdf(cid: str, idx: str, url: str, timeout: int = 30) -> str
         text = t.stdout.decode("utf-8", "replace").strip()
         if len(text) < 200:
             return None
+        # 标题：找 "Problem A. Name" / "A. Name" 行（PDF 首行常是页码/空行）
         lines = text.split("\n")
-        title = lines[0].strip() if lines else f"{cid}{idx}"
-        body = "\n".join(l.rstrip() for l in lines[1:]).strip()
+        title = f"{cid}{idx}"
+        ti = 0
+        for i, ln in enumerate(lines[:6]):
+            t = ln.strip()
+            if re.match(r"^(?:Problem\s+)?[A-Z][A-Z0-9]*\.\s+\S", t):
+                title = t
+                ti = i
+                break
+        body = "\n".join(l.rstrip() for l in lines[ti + 1:]).strip()
         md = f"# {title}\n\n> 📄 本场比赛仅有 PDF 题面（无 HTML 版），已用文本提取，公式可能失真\n\n{body}"
         os.makedirs(STATEMENT_DIR, exist_ok=True)
         with open(statement_path(cid, idx), "w", encoding="utf-8") as f:
