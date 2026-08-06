@@ -368,7 +368,7 @@ def _clean(lines) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     # 去掉 markdown 空标题
     text = re.sub(r"^#\s*$", "", text, flags=re.M)
-    # 行内连续空格压缩（跳过 ``` 代码块，保护样例对齐）
+    # 行内连续空格压缩 + 修复孤立 **（跳过 ``` 代码块，保护样例对齐）
     out_lines = []
     in_code = False
     for line in text.split("\n"):
@@ -376,10 +376,24 @@ def _clean(lines) -> str:
             in_code = not in_code
         if not in_code:
             line = re.sub(r"[ \t]{2,}", " ", line).rstrip()
+            line = _fix_broken_bold(line)
         out_lines.append(line)
     text = "\n".join(out_lines)
     text = _strip_footer(text)
     return text.strip() + "\n"
+
+
+def _fix_broken_bold(line: str) -> str:
+    """修复 CF 老博客标签残缺产生的孤立 **（如 <b><br/></b> 空粗体）：
+    行内 ** 为奇数个时——单独行删除、行尾孤立删除、行首孤立删除开标记"""
+    if line.count("**") % 2 == 1:
+        if line.strip() == "**":
+            return ""
+        if line.endswith("**") and line.count("**") == 1:
+            return line[:-2]
+        if line.startswith("**"):
+            return line[2:]
+    return line
 
 
 if __name__ == "__main__":
