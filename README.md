@@ -34,7 +34,7 @@ cd cfdb
 python3 server.py          # start server (auto incremental crawl on startup)
 
 # With full data snapshot (statements/editorials/images, tagged snapshot2026.8):
-git clone -b snapshot https://github.com/<your-username>/cfdb.git
+git clone -b snapshot https://github.com/xyt-dev/cfdb.git
 ```
 
 Then open <http://localhost:8765> (LAN address is printed on startup).
