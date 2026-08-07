@@ -1768,15 +1768,6 @@ img { max-width:100%; height:auto; display:block; margin:10px auto; }
 ul,ol { padding-left: 24px; margin: 8px 0; }
 li { margin: 4px 0; }
 blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px; color:#889; }
-/* ═══ 可折叠小节（Hint/Solution/Tutorial 等）——无框简易样式 ═══ */
-details.fold { margin:6px 0; }
-details.fold summary { cursor:pointer; padding:2px 0; font-family:${sansStack};
-  font-size:14.5px; color:${c.accent}; user-select:none; list-style:none; }
-details.fold summary::-webkit-details-marker { display:none; }
-details.fold summary::before { content:'▸ '; color:${c.subtext}; }
-details.fold[open] summary::before { content:'▾ '; }
-details.fold .fold-body { padding-left:22px; }
-details.fold .fold-body > :first-child { margin-top:6px; }
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]},startup:{typeset:false}};<\/script>
 <script src="/vendor/tex-svg-full.js"><\/script>
@@ -1828,59 +1819,6 @@ document.querySelectorAll('#md > p').forEach(function(p){
     p.style.textAlign = 'center';
   }
 });
-/* ═══ Hint/Solution/Tutorial 等小节 → 可折叠 ═══
-   遇小节标题开启 details，收集后续兄弟节点，遇下一小节标题/分割线/标题收束 */
-(function () {
-  var KEYS = /^(Hint|Solution|Tutorial|Code|Feedback|Approach|Proof|Observation|Note|Complexity|Implementation|Explanation|Idea|Alternative|Official)/i;
-  // 题号标题识别（下一题边界——与前端 normalizeProblemHeaders 同款规则）
-  function isProblemTitleText(t) {
-    t = (t || '').trim();
-    if (/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S/.test(t)) return true;
-    if (/^[A-Z]\d[A-Z]?\d?\s+\S/.test(t)) return true;
-    return false;
-  }
-  var root = document.getElementById('md');
-  var kids = Array.prototype.slice.call(root.children);
-  var open = null;
-  function flush() {
-    var det = document.createElement('details');
-    det.className = 'fold';
-    var sum = document.createElement('summary');
-    sum.innerHTML = open.head.innerHTML;
-    det.appendChild(sum);
-    var body = document.createElement('div');
-    body.className = 'fold-body';
-    open.items.forEach(function (n) { body.appendChild(n); });
-    det.appendChild(body);
-    open.head.replaceWith(det);
-  }
-  kids.forEach(function (el) {
-    if (el.tagName === 'HR' || /^H[1-6]$/.test(el.tagName)) {
-      if (open) flush();
-      open = null;
-      return;
-    }
-    var strong = null;
-    if (el.tagName === 'P' && el.children.length === 1 && el.children[0].tagName === 'STRONG') {
-      strong = el.children[0].textContent.trim();
-    }
-    // 下一题题号标题（未 wrap 的 **B. xxx** 等格式）：折叠收束边界
-    // 否则下一题的描述会被收进上一题的 Solution 折叠块
-    var txt = el.textContent.trim();
-    if (txt && txt.length < 60 && isProblemTitleText(txt)) {
-      if (open) flush();
-      open = null;
-      return;
-    }
-    if (strong && strong.length <= 50 && KEYS.test(strong)) {
-      if (open) flush();
-      open = { head: el, items: [] };
-      return;
-    }
-    if (open) open.items.push(el);
-  });
-  if (open) flush();
-})();
 /* ═══ iframe 高度自动同步（根本解决）：MutationObserver 监听内容变化，
    折叠展开/图片加载/公式渲染/代码高亮一律触发——不再依赖逐个事件 ═══ */
 var _syncTimer = null;

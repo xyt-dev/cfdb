@@ -22,6 +22,9 @@
 
 - **透明图片白底优化**：CF 题面/题解图片很多是透明 PNG（内容为白底设计）——深色主题下透明区与黑底糊成一片 → 新增 `_flatten_transparent_png`（**纯标准库 zlib/struct，零外部依赖**）把透明像素按 alpha 合成到白色背景；支持 RGBA / gray+alpha / palette+tRNS（1/2/4/8-bit 拆位）/ RGB+tRNS 透明色键，不透明图零开销跳过；图片下载后自动处理，已爬 140 个透明图全部白底化（残留 0）
 
+- **题解不再折叠**：删除 srcdoc 折叠逻辑（`details.fold` + KEYS 小节检测）——Solution/Hint/Tutorial 等小节直接展开显示（无需点击），题面不受影响
+- **透明图片白底增强**：`_flatten_transparent_png` 扩展——16-bit RGBA/gray+alpha、gray+tRNS（1/2/4/8/16-bit 拆位）、palette 低位尾字节越界修复（stride ceil 多出像素→写入越界）、RGB+tRNS 16-bit 解析；题解图存量 6260 个 + 题面图全部白底化（12612/12614，2 个损坏文件跳过）
+
 ## [v2.4.0] - 2026-08-06
 
 ### 修复

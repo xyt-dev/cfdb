@@ -80,8 +80,9 @@ IMAGE_DIR = os.path.join(STATEMENT_DIR, "images")
 
 def _flatten_transparent_png(path: str) -> bool:
     """透明 PNG → 白色背景（项目功能，纯标准库 zlib/struct——零外部依赖）。
-    支持 colortype 6（RGBA）/ 4（gray+alpha）/ 3（palette+tRNS），8-bit 非隔行。
-    透明像素按 alpha 合成到白色；不透明/不支持格式返回 False（原图保留）"""
+    支持：RGBA(6) / gray+alpha(4) / RGB+tRNS(2) / gray+tRNS(0) / palette+tRNS(3)，
+    8/16-bit（palette 1/2/4/8-bit 拆位）。透明像素按 alpha 合成到白色；
+    不透明/隔行/损坏返回 False（原图保留）"""
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -111,26 +112,33 @@ def _flatten_transparent_png(path: str) -> bool:
             elif typ == b"IEND":
                 break
             pos += 12 + ln
-        if w is None or h is None or not idat:
+        if w is None or h is None or not idat or w <= 0 or h <= 0:
             return False
+        if colortype not in (0, 2, 3, 4, 6):
+            return False
+        if colortype == 0 and not trns:
+            return False  # gray 无透明色键——不处理
+        if colortype == 2 and not trns:
+            return False  # RGB 无透明色键——不处理
         if colortype == 3:
             if bitdepth not in (1, 2, 4, 8):
-                return False  # palette 支持 1/2/4/8-bit
-        elif colortype in (4, 6):
-            if bitdepth != 8:
                 return False
-        elif colortype == 2:
-            if not trns:
-                return False  # RGB 无透明色键——不处理
-        else:
-            return False  # 仅透明格式需要处理
+        elif colortype == 0:
+            if bitdepth not in (1, 2, 4, 8, 16):
+                return False  # gray 低位（1/2/4-bit 拆位）
+        elif bitdepth not in (8, 16):
+            return False
         raw = zlib.decompress(idat)
+        # 样本通道数（每像素）
+        channels = {6: 4, 4: 2, 2: 3, 0: 1, 3: 1}[colortype]
+        bytes_per_sample = bitdepth // 8
         if colortype == 3:
             stride = (w * bitdepth + 7) // 8
-            channels = 1  # unfilter 的 bpp（低位 palette 用 1 近似——Sub/Paeth 罕见）
+            bpp = 1  # palette 低位 Sub/Paeth 用字节级近似（编码器罕见用）
         else:
-            channels = {6: 4, 4: 2, 2: 3}[colortype]
-            stride = w * channels
+            stride = w * channels * bytes_per_sample
+            bpp = channels * bytes_per_sample
+        # 解码（unfilter 0-4）
         rows = []
         prev = bytearray(stride)
         p2 = 0
@@ -139,66 +147,83 @@ def _flatten_transparent_png(path: str) -> bool:
             row = bytearray(raw[p2 + 1:p2 + 1 + stride])
             p2 += 1 + stride
             if ft == 1:  # Sub
-                for i in range(channels, stride):
-                    row[i] = (row[i] + row[i - channels]) & 0xFF
+                for i in range(bpp, stride):
+                    row[i] = (row[i] + row[i - bpp]) & 0xFF
             elif ft == 2:  # Up
                 for i in range(stride):
                     row[i] = (row[i] + prev[i]) & 0xFF
             elif ft == 3:  # Average
                 for i in range(stride):
-                    left = row[i - channels] if i >= channels else 0
+                    left = row[i - bpp] if i >= bpp else 0
                     row[i] = (row[i] + ((left + prev[i]) >> 1)) & 0xFF
             elif ft == 4:  # Paeth
                 for i in range(stride):
-                    a = row[i - channels] if i >= channels else 0
+                    a = row[i - bpp] if i >= bpp else 0
                     b = prev[i]
-                    c = prev[i - channels] if i >= channels else 0
+                    c = prev[i - bpp] if i >= bpp else 0
                     pv = a + b - c
                     pa, pb, pc = abs(pv - a), abs(pv - b), abs(pv - c)
                     pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
                     row[i] = (row[i] + pr) & 0xFF
             rows.append(row)
             prev = row
-        # alpha 合成到白色 → RGB
+        # 每像素 → (r,g,b,a) 8-bit 流，合成白色
         out = bytearray(w * h * 3)
         o = 0
         if colortype == 6:  # RGBA
+            step = 4 * bytes_per_sample
             for row in rows:
-                for i in range(0, stride, 4):
-                    r, g, b, a = row[i], row[i + 1], row[i + 2], row[i + 3]
-                    if a == 255:
-                        out[o], out[o + 1], out[o + 2] = r, g, b
-                    elif a == 0:
-                        out[o], out[o + 1], out[o + 2] = 255, 255, 255
+                for i in range(0, stride, step):
+                    if bytes_per_sample == 2:
+                        r = row[i]; g = row[i + 2]; b = row[i + 4]; a = row[i + 6]
                     else:
-                        inv = 255 - a
-                        out[o] = (r * a + 255 * inv + 127) // 255
-                        out[o + 1] = (g * a + 255 * inv + 127) // 255
-                        out[o + 2] = (b * a + 255 * inv + 127) // 255
-                    o += 3
+                        r, g, b, a = row[i], row[i + 1], row[i + 2], row[i + 3]
+                    _mix(out, o, r, g, b, a); o += 3
         elif colortype == 4:  # gray + alpha
+            step = 2 * bytes_per_sample
             for row in rows:
-                for i in range(0, stride, 2):
-                    g, a = row[i], row[i + 1]
-                    if a == 255:
-                        v = g
-                    elif a == 0:
-                        v = 255
+                for i in range(0, stride, step):
+                    if bytes_per_sample == 2:
+                        g = row[i]; a = row[i + 2]
                     else:
-                        v = (g * a + 255 * (255 - a) + 127) // 255
-                    out[o] = out[o + 1] = out[o + 2] = v
-                    o += 3
-        elif colortype == 2:  # RGB + tRNS 透明色键（tRNS 每色 2 字节 16-bit——8-bit 图取低字节）
-            kr, kg, kb = trns[1], trns[3], trns[5]
+                        g, a = row[i], row[i + 1]
+                    _mix(out, o, g, g, g, a); o += 3
+        elif colortype == 2:  # RGB + tRNS 透明色键
+            key = (trns[1], trns[3], trns[5]) if bytes_per_sample == 1 else (trns[0], trns[2], trns[4])
+            step = 3 * bytes_per_sample
             for row in rows:
-                for i in range(0, stride, 3):
-                    r, g, b = row[i], row[i + 1], row[i + 2]
-                    if (r, g, b) == (kr, kg, kb):
-                        out[o], out[o + 1], out[o + 2] = 255, 255, 255
+                for i in range(0, stride, step):
+                    if bytes_per_sample == 2:
+                        r, g, b = row[i], row[i + 2], row[i + 4]
                     else:
-                        out[o], out[o + 1], out[o + 2] = r, g, b
-                    o += 3
-        else:  # palette + tRNS（含 1/2/4-bit 拆位）
+                        r, g, b = row[i], row[i + 1], row[i + 2]
+                    if (r, g, b) == key:
+                        _mix(out, o, 255, 255, 255, 0); o += 3
+                    else:
+                        _mix(out, o, r, g, b, 255); o += 3
+        elif colortype == 0:  # gray + tRNS 透明色键
+            key = trns[1] if bytes_per_sample == 1 else trns[0]
+            if bitdepth in (1, 2, 4):
+                per_byte = 8 // bitdepth
+                mask = (1 << bitdepth) - 1
+                for row in rows:
+                    n = 0
+                    for byte in row:
+                        for sh in range(per_byte - 1, -1, -1):
+                            if n >= w:
+                                break
+                            g = (byte >> (sh * bitdepth)) & mask
+                            a = 0 if g == key else 255
+                            _mix(out, o, g, g, g, a); o += 3
+                            n += 1
+            else:
+                step = bytes_per_sample
+                for row in rows:
+                    for i in range(0, stride, step):
+                        g = row[i]
+                        a = 0 if g == key else 255
+                        _mix(out, o, g, g, g, a); o += 3
+        else:  # palette + tRNS（1/2/4/8-bit 拆位）
             ncolors = len(plte) // 3 if plte else 0
             pal = [(plte[i * 3], plte[i * 3 + 1], plte[i * 3 + 2]) for i in range(ncolors)]
             alphas = [255] * ncolors
@@ -212,28 +237,21 @@ def _flatten_transparent_png(path: str) -> bool:
                 per_byte = 8 // bitdepth
                 mask = (1 << bitdepth) - 1
                 def idx_iter(row):
+                    n = 0
                     for byte in row:
                         for sh in range(per_byte - 1, -1, -1):
+                            if n >= w:
+                                return  # stride ceil 尾字节多余像素——不越界
                             yield (byte >> (sh * bitdepth)) & mask
+                            n += 1
             for row in rows:
                 for idx in idx_iter(row):
                     if idx < ncolors:
-                        r, g, b = pal[idx]
-                        a = alphas[idx]
+                        r, g, b = pal[idx]; a = alphas[idx]
                     else:
-                        r = g = b = 255
-                        a = 255
-                    if a == 255:
-                        out[o], out[o + 1], out[o + 2] = r, g, b
-                    elif a == 0:
-                        out[o], out[o + 1], out[o + 2] = 255, 255, 255
-                    else:
-                        inv = 255 - a
-                        out[o] = (r * a + 255 * inv + 127) // 255
-                        out[o + 1] = (g * a + 255 * inv + 127) // 255
-                        out[o + 2] = (b * a + 255 * inv + 127) // 255
-                    o += 3
-        # 重编码（filter 0）写回
+                        r = g = b = 255; a = 255
+                    _mix(out, o, r, g, b, a); o += 3
+        # 重编码（8-bit RGB，filter 0）
         enc = bytearray()
         for y in range(h):
             enc.append(0)
@@ -251,6 +269,19 @@ def _flatten_transparent_png(path: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _mix(out: bytearray, o: int, r: int, g: int, b: int, a: int) -> None:
+    """单像素 alpha 合成白色（a 0-255；16-bit 高位字节）"""
+    if a >= 255:
+        out[o], out[o + 1], out[o + 2] = r, g, b
+    elif a <= 0:
+        out[o], out[o + 1], out[o + 2] = 255, 255, 255
+    else:
+        inv = 255 - a
+        out[o] = (r * a + 255 * inv + 127) // 255
+        out[o + 1] = (g * a + 255 * inv + 127) // 255
+        out[o + 2] = (b * a + 255 * inv + 127) // 255
 
 
 def _download_image(url: str, name: str, img_dir: str | None = None) -> str | None:
