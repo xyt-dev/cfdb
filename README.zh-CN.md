@@ -28,9 +28,13 @@
 ## 快速开始
 
 ```bash
+# 仅代码（无数据）——数据在 snapshot 分支
 git clone https://github.com/<你的用户名>/cfdb.git
 cd cfdb
 python3 server.py          # 启动（启动时自动增量爬取）
+
+# 带完整数据快照（statements/editorials/images，tag snapshot2026.8）：
+git clone -b snapshot https://github.com/<你的用户名>/cfdb.git
 ```
 
 打开 <http://localhost:8765>（启动时打印局域网地址）。
