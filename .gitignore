@@ -1,11 +1,7 @@
-# 爬取数据（update.py 可再生成，不入库）
-statements/
+# 数据快照入库（snapshot tag）；备份目录不入库
 statements_bak/
-editorials/
 editorials_bak/
 editorials_bak2/
-problems.json
-failed_statements.json
 
 # 依赖与运行时产物
 node_modules/
@@ -14,4 +10,3 @@ __pycache__/
 
 # 本地临时
 *.log
-failed_editorials.json

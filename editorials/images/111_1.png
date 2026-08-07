@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+	<meta charset="utf-8">
+<title>&quot;Полит.ua&quot; - Информационно-аналитический портал</title>
+<meta name="description" content="Информационно-аналитический портал «Полит.ua» - Цель «Полит.ua»  - создание конструктивной дискуссии по теме дня и рефлексия актуальных общественно значимых событий.">
+<meta name="keywords" content="политика, бизнес, общество, финансы, СМИ, новости">
+<meta name="generator" content="DataLife Engine (http://dle-news.ru)">
+<link rel="search" type="application/opensearchdescription+xml" href="http://polit.ua/index.php?do=opensearch" title="&quot;Полит.ua&quot; - Информационно-аналитический портал">
+<link rel="canonical" href="http://polit.ua/">
+<link rel="alternate" type="application/rss+xml" title="&quot;Полит.ua&quot; - Информационно-аналитический портал" href="http://polit.ua/rss.xml">
+	 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	  <link rel="shortcut icon" href="/templates/polit/images/favicon.ico" />
+	  <link href="/templates/polit/style/styles.css" type="text/css" rel="stylesheet" />
+	  <link href="/templates/polit/style/engine.css" type="text/css" rel="stylesheet" />
+	  <!--[if lt IE 9]><script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script><![endif]-->
+	  <link href="https://fonts.googleapis.com/css?family=PT+Sans:400,400i,700,700i|PT+Serif:400,700&amp;subset=cyrillic" rel="stylesheet"> 
+<meta name="rp2ed693802c204241b7f659bb567526eb" content="765581a3b30edb1727affd3d0365442a" />
+<meta name="a86368f42e02f7809aa2bdb2fbd17bb5" content="">
+<meta name="1b08c60fb231313f87b7cb831424ebf8" content="e7d2b3dac89c072837a5def5508a7d84" />    
+<meta name="Gogetlinks1490023" content="Gogetlinks1490023">    
+    
+</head>
+
+<body>
+
+<div class="wrap">
+
+	<div class="block center">
+	
+		<header class="header clearfix">
+		
+			<a href="/" class="logo" title="На главную"><img src="/templates/polit/images/logo.png" alt="sitename" /></a>
+			
+			<div class="header-right">
+				<div class="search-box">
+					<form id="quicksearch" method="post">
+						<input type="hidden" name="do" value="search" />
+						<input type="hidden" name="subaction" value="search" />
+						<div class="search-field">
+							<input id="story" name="story" placeholder="Введите слово для поиска" type="text" />
+							<button type="submit"><span class="fa fa-search"></span></button>
+						</div>
+					</form>
+				</div>
+				<a href="#" class="spec-link icon-l"><span class="fa fa-eye"></span>Версия для слабовидящих</a>
+			</div>
+			
+			<div class="header-middle">
+				<span class="fa fa-phone"></span>
+				<span>Телефоны для связи:</span> 
+				<div class="phone">(044) 256-56-56</div>
+				<div class="phone">(068) 356-56-56</div>
+				<div class="feedback-link"><a href="/?do=feedback">Все контакты</a></div>
+			</div>
+
+		</header>
+		
+		<!-- END HEADER -->
+		
+		<div class="cols clearfix">
+		
+			<aside class="side-left">
+			
+				<nav class="side-box side-blue mob-menu">
+                    <div class="side-bt">Спецпроект</div>
+					<ul class="side-bc side-nav">
+						<li><a href="/dja/">ДіЯ</a></li>
+					</ul>
+					<div class="side-bt">Рубрики</div>
+					<ul class="side-bc side-nav">
+						<li><a href="/politic/">Политика</a></li>                        
+						<li><a href="/news/">Новости</a></li>
+						<li><a href="/ekonomika/">Экономика</a></li>
+						<li><a href="/religiya/">Религия</a></li>
+						<li><a href="/culture/">Культура</a></li>
+						<li><a href="/science/">Наука</a></li>
+						<li><a href="/foto/">Фоторепортажи</a></li>
+					</ul>
+					<div class="side-bt">Разделы</div>
+					<ul class="side-bc side-nav">
+						<li><a href="/articles/">Статьи</a></li>
+						<li><a href="/nations/">Страны</a></li>
+						<li><a href="/lec/">Лекции</a></li>
+						<li><a href="/analitics/">Аналитика</a></li>
+						<li><a href="/doc/">Документы</a></li>
+					</ul>
+
+                    
+				</nav>
+				
+				<div class="side-box">
+					<div class="side-bt">Календарь</div>
+					<div class="side-bc">
+						<div id="calendar-layer"><table id="calendar" class="calendar"><tr><th colspan="7" class="monthselect"><a class="monthlink" onclick="doCalendar('07','2026','right'); return false;" href="http://polit.ua/2026/07/" title="Предыдущий месяц">&laquo;</a>&nbsp;&nbsp;&nbsp;&nbsp;Август 2026&nbsp;&nbsp;&nbsp;&nbsp;&raquo;</th></tr><tr><th class="workday">Пн</th><th class="workday">Вт</th><th class="workday">Ср</th><th class="workday">Чт</th><th class="workday">Пт</th><th class="weekday">Сб</th><th class="weekday">Вс</th></tr><tr><td colspan="5">&nbsp;</td><td  class="weekday" >1</td><td  class="weekday" >2</td></tr><tr><td  class="day" >3</td><td  class="day" >4</td><td  class="day" >5</td><td  class="day day-current" >6</td><td  class="day" >7</td><td  class="weekday" >8</td><td  class="weekday" >9</td></tr><tr><td  class="day" >10</td><td  class="day" >11</td><td  class="day" >12</td><td  class="day" >13</td><td  class="day" >14</td><td  class="weekday" >15</td><td  class="weekday" >16</td></tr><tr><td  class="day" >17</td><td  class="day" >18</td><td  class="day" >19</td><td  class="day" >20</td><td  class="day" >21</td><td  class="weekday" >22</td><td  class="weekday" >23</td></tr><tr><td  class="day" >24</td><td  class="day" >25</td><td  class="day" >26</td><td  class="day" >27</td><td  class="day" >28</td><td  class="weekday" >29</td><td  class="weekday" >30</td></tr><tr><td  class="day" >31</td><td colspan="6">&nbsp;</td></tr></table></div>
+					</div>
+				</div>
+				
+
+				
+				<div class="side-box side-grey">
+					<div class="side-bt">Лента</div>
+					<div class="side-bc">
+						<div class="side-item">
+	<div class="side-item-date">03 август 2023, Четверг</div>
+	<a class="side-item-link" href="http://polit.ua/news/1862-igrovoj-slot-cleos-secrets-otkrojte-tainstvennyj-mir-onlajn-v-roks-kazino.html">Игровой слот CLEO&#039;S SECRETS: Откройте Таинственный мир онлайн в Рокс Казино</a>
+</div><div class="side-item">
+	<div class="side-item-date">05 январь 2023, Четверг</div>
+	<a class="side-item-link" href="http://polit.ua/news/1776-aleksej-ivanov-opublikoval-statju-ob-osobennostjah-igrovyh-avtomatov-i-ih-razrabotchikah.html">Алексей Иванов опубликовал статью об особенностях игровых автоматов и их разработчиках</a>
+</div><div class="side-item">
+	<div class="side-item-date">20 август 2022, Суббота</div>
+	<a class="side-item-link" href="http://polit.ua/news/1716-luchshie-goroda-polshi-dlya-pmzh.html">Лучшие города Польши для ПМЖ</a>
+</div><div class="side-item">
+	<div class="side-item-date">01 октябрь 2020, Четверг</div>
+	<a class="side-item-link" href="http://polit.ua/news/922-sovremennye-igrovye-avtomaty-onlajn-i-bonusy-v-kazino-pointloto.html">Современные игровые автоматы онлайн и бонусы в казино Pointloto</a>
+</div><div class="side-item">
+	<div class="side-item-date">22 июнь 2020, Понедельник</div>
+	<a class="side-item-link" href="http://polit.ua/news/704-pochemu-pokupat-avto-na-amerikanskih-aukcionah-jeto-vygodno.html">Почему покупать авто на американских аукционах — это выгодно</a>
+</div>
+					</div>
+				</div>
+				
+				<div class="side-box">
+					<div class="side-bt">Опрос</div>
+					<div class="side-bc">
+						<script>
+<!--
+function doVote( event ){
+
+	
+	var vote_check = $('#dle-vote input:radio[name=vote_check]:checked').val();
+	
+	if (typeof vote_check == "undefined" &&  event == "vote") {
+		return false;
+	}
+	
+	ShowLoading('');
+
+	$.get(dle_root + "engine/ajax/controller.php?mod=vote", { vote_id: "3", vote_action: event, vote_check: vote_check, vote_skin: dle_skin, user_hash: dle_login_hash }, function(data){
+
+		HideLoading('');
+
+		$("#vote-layer").fadeOut(500, function() {
+			$(this).html(data);
+			$(this).fadeIn(500);
+		});
+
+	});
+}
+//-->
+</script><div id='vote-layer'><div class="vote-box">			
+		<div class="vote-title">
+			Нужно ли каждому вводить этику, чтобы улучшить ситуацию в стране?
+		</div>
+		<div class="vote-list">
+			<form method="post" name="vote">
+			<div id="dle-vote"><div class="vote"><input id="vote_check0" name="vote_check" type="radio" value="0" /><label for="vote_check0"> Да, нужно</label></div><div class="vote"><input id="vote_check1" name="vote_check" type="radio" value="1" /><label for="vote_check1"> Не обязательно</label></div><div class="vote"><input id="vote_check2" name="vote_check" type="radio" value="2" /><label for="vote_check2"> Затрудняюсь ответить</label></div><div class="vote"><input id="vote_check3" name="vote_check" type="radio" value="3" /><label for="vote_check3"> Не нужно</label></div></div>
+						
+			
+				<input type="hidden" name="vote_action" value="vote" />
+				<input type="hidden" name="vote_id" id="vote_id" value="3" />
+			<div class="vote-buts fx-row">
+				<button class="vvote" type="submit" onclick="doVote('vote'); return false;" >Голосовать</button>
+				<button class="vres" type="button" onclick="doVote('results'); return false;" ><span class="fa fa-align-left"></span></button>
+				<button class="vall" type="submit" onclick="ShowAllVotes(); return false;" ><span class="fa fa-plus"></span></button>
+			</div>
+			</form>
+			
+	</div>
+</div>	</div>
+					</div>
+				</div>
+                
+			</aside>
+			
+			<!-- END SIDE-LEFT -->
+			
+			<main class="main clearfix">
+			
+				<ul class="head-menu clearfix">
+					<li><a href="/"><span class="fa fa-home"></span></a></li>
+					<li><a href="/">Главная</a></li>
+					<li><a href="/about.html">О Проекте</a></li>
+					<li><a href="/?do=feedback">Контакты</a></li>
+					<li class="show-login icon-l"><span class="fa fa-user"></span>Авторизация</li>
+					
+					<li class="btn-menu icon-l"><span class="fa fa-bars"></span>Меню</li>
+				</ul>
+				
+				
+								<div class="sect sect-main">
+					<div class="sect-c fx-row">
+						
+<div class="main-col-left">
+<div class="main-item">
+	<a class="main-item-img img-resp-h" href="http://polit.ua/articles/2038-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">
+	<img src="/templates/polit/dleimages/no_image.jpg" alt="Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості" />
+	<div class="main-item-cat">Статьи</div>
+	</a>
+	<div class="main-item-date icon-l"><span class="fa fa-clock-o"></span>09 январь 2026, Пятница</div>
+	<a class="main-item-link" href="http://polit.ua/articles/2038-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості</a>
+	<div class="main-item-text">У процесі ведення бізнесу часто виникають ситуації, коли фінансові ресурси потрібні негайно: для оплати постачальникам, закупівлі сировини, виплати заробітної плати, виконання контрактних зобов’язань...</div>
+</div>
+
+
+
+
+
+<div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/articles/2037-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості</a>
+	<span class="row-item-date">09 январь 2026, Пятница</span>
+</div>
+
+
+
+
+<div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/dja/1997-vneseny-izmenenija-v-polozhenie-o-gosudarstvennoj-nalogovoj-sluzhbe-ukrainy.html">Внесены изменения в Положение о Государственной налоговой службе Украины</a>
+	<span class="row-item-date">30 октябрь 2025, Четверг</span>
+</div>
+
+
+
+
+<div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/dja/2029-zaderzhanie-advokata-za-soglasiem-vrp.html">Задержание адвоката – за согласием ВРП</a>
+	<span class="row-item-date">28 октябрь 2025, Вторник</span>
+</div>
+
+
+
+
+
+</div>
+<div class="main-col-right">
+<div class="main-item">
+	<a class="main-item-img img-resp-h" href="http://polit.ua/dja/2030-dbr-otmenilo-svyshe-800-reshenij-msjek-kogo-lishili-statusa-i-chto-izvestno.html"><img src="/uploads/posts/2025-08/thumbs/1755448467_24.jpg" alt="«ДБР отменило свыше 800 решений МСЭК»: кого лишили статуса и что известно" /></a>
+	<div class="main-item-date">27 октябрь 2025, Понедельник</div>
+	<a class="main-item-link" href="http://polit.ua/dja/2030-dbr-otmenilo-svyshe-800-reshenij-msjek-kogo-lishili-statusa-i-chto-izvestno.html">«ДБР отменило свыше 800 решений МСЭК»: кого лишили статуса и что известно</a>
+	<div class="main-item-text">Госбюро расследований обнародовало итоги масштабной проверки решений МСЭК: отменены свыше 800...</div>
+</div>
+
+
+
+
+
+<div class="main-item">
+	<a class="main-item-img img-resp-h" href="http://polit.ua/dja/2006-vysshij-sovet-pravosudija-prinjal-reshenie-ob-otstavke-chetyreh-sudej.html"><img src="/uploads/posts/2024-12/thumbs/1733920619_3_3.jpg" alt="Высший совет правосудия принял решение об отставке четырех судей" /></a>
+	<div class="main-item-date">26 октябрь 2025, Воскресенье</div>
+	<a class="main-item-link" href="http://polit.ua/dja/2006-vysshij-sovet-pravosudija-prinjal-reshenie-ob-otstavke-chetyreh-sudej.html">Высший совет правосудия принял решение об отставке четырех судей</a>
+	<div class="main-item-text">Высший совет правосудия рассмотрел заявления об отставке и освободил от должности четырех судей в...</div>
+</div>
+</div>
+
+					</div>
+				</div>
+				
+				<div class="sect">
+					<div class="sect-t fx-row fx-middle">
+						<h2>Лента новостей</h2>
+						<div class="sect-links icon-l">
+							<a href="/news/"><span class="fa fa-plus"></span>Ссылка</a>
+						</div>
+					</div>
+					<div class="sect-c">
+						<div class="news-item clearfix">
+	<a class="news-item-img img-box" href="http://polit.ua/articles/2032-kak-uznat-ripple-skolko-stoit-i-prinjat-reshenie-delovoj-razbor.html">
+		<img src="/uploads/posts/2025-08/thumbs/1756499665_uznat-ripple-skolko-stoit.jpg" alt="Как узнать Ripple сколько стоит и принять решение – деловой разбор" />
+	</a>
+	<div class="news-item-date">05 сентябрь 2025, Пятница</div>
+	<a class="news-item-title" href="http://polit.ua/articles/2032-kak-uznat-ripple-skolko-stoit-i-prinjat-reshenie-delovoj-razbor.html">Как узнать Ripple сколько стоит и принять решение – деловой разбор</a>
+	<div class="news-item-text">Краткий план для управленца: где узнать Ripple сколько стоит, какие факторы двигают цену и как встроить токен в финансовую модель без лишних рисков....</div>
+</div><div class="news-item clearfix">
+	<a class="news-item-img img-box" href="http://polit.ua/articles/2031-detalno-pro-vidi-ta-priznachennja-faneri.html">
+		<img src="/uploads/posts/2025-08/thumbs/1756070535_detalno-pro-vidi-ta-priznachennja-faneri.jpg" alt="Детально про види та призначення фанери" />
+	</a>
+	<div class="news-item-date">18 август 2025, Понедельник</div>
+	<a class="news-item-title" href="http://polit.ua/articles/2031-detalno-pro-vidi-ta-priznachennja-faneri.html">Детально про види та призначення фанери</a>
+	<div class="news-item-text">У наші дні фанера застосовується у будівництві та ремонті для облаштування стін, підлог та стель, створення опалубки та перегородок, а також у...</div>
+</div><div class="news-item clearfix">
+	<a class="news-item-img img-box" href="http://polit.ua/articles/2026-samye-vpechatlyayushchie-hramy-v-goa.html">
+		<img src="/uploads/posts/2025-08/thumbs/1755446853_indija.jpg" alt="Самые впечатляющие храмы в Гоа" />
+	</a>
+	<div class="news-item-date">10 август 2025, Воскресенье</div>
+	<a class="news-item-title" href="http://polit.ua/articles/2026-samye-vpechatlyayushchie-hramy-v-goa.html">Самые впечатляющие храмы в Гоа</a>
+	<div class="news-item-text">Духовное наследие штата Гоа представляет собой уникальное сочетание различных религиозных традиций, где индуистские святилища соседствуют с...</div>
+</div><div class="news-item clearfix">
+	<a class="news-item-img img-box" href="http://polit.ua/articles/2025-agentskie-reklamnye-akkaunty-tiktok-chto-jeto-dlja-kogo-i-v-chem-preimuschestva.html">
+		<img src="/uploads/posts/2025-08/thumbs/1754059538_agentskie-reklamnye-akkaunty-tiktok.jpg" alt="Агентские рекламные аккаунты TikTok: что это, для кого и в чем преимущества" />
+	</a>
+	<div class="news-item-date">25 июль 2025, Пятница</div>
+	<a class="news-item-title" href="http://polit.ua/articles/2025-agentskie-reklamnye-akkaunty-tiktok-chto-jeto-dlja-kogo-i-v-chem-preimuschestva.html">Агентские рекламные аккаунты TikTok: что это, для кого и в чем преимущества</a>
+	<div class="news-item-text">Однако для эффективного ведения рекламных кампаний на платформе многие выбирают рекламные агентские аккаунты TikTok. Что это такое, кому это нужно и...</div>
+</div><div class="news-item clearfix">
+	<a class="news-item-img img-box" href="http://polit.ua/articles/2024-kak-prevratit-cifrovye-monety-v-aktivy-investirovanie-i-obmen-kriptovaljuty-s-umom.html">
+		<img src="/uploads/posts/2025-06/thumbs/1749194680_kriptobirzhi-otzyvy-realnye.jpg" alt="Как превратить цифровые монеты в активы – инвестирование и обмен криптовалюты с умом" />
+	</a>
+	<div class="news-item-date">31 май 2025, Суббота</div>
+	<a class="news-item-title" href="http://polit.ua/articles/2024-kak-prevratit-cifrovye-monety-v-aktivy-investirovanie-i-obmen-kriptovaljuty-s-umom.html">Как превратить цифровые монеты в активы – инвестирование и обмен криптовалюты с умом</a>
+	<div class="news-item-text">Инвестирование и обмен криптовалюты: как выбрать криптобиржи, что говорят EXMO отзывы, и зачем трейдеру нужен хладнокровный ум. Цифровые активы,...</div>
+</div>
+					</div>
+				</div>
+
+				<div class="sect">
+					<div class="sect-t fx-row fx-middle">
+						<h2>Аналитика</h2>
+						<div class="sect-links icon-l">
+							<a href="/analitics/"><span class="fa fa-plus"></span>Ссылка</a>
+						</div>
+					</div>
+					<div class="sect-c">
+						<div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/562-chest-krov-i-ritorika.html">Честь, кров i риторика</a>
+	<span class="row-item-date">24 июнь 2019, Понедельник</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/286-galickij-varant-ukrayinskoyi-movi-ta-antiukrayinskij-diskurs-suchasnih-nternet-dzherel.html">Галицький варіант української мови та антиукраїнський дискурс сучасних інтернет-джерел</a>
+	<span class="row-item-date">23 июнь 2019, Воскресенье</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/319-mihail-davydov-o-stolypine.html">Михаил Давыдов о Столыпине</a>
+	<span class="row-item-date">06 июнь 2019, Четверг</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/305-dokumenti-komunstichnih-organv-bezpeki-v-ukrayin.html">Документи комуністичних органів безпеки в Україні</a>
+	<span class="row-item-date">31 май 2019, Пятница</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/561-kak-gitler-stalin-i-cherchill-protivostojavshie-drug-drugu-vo-vtoroj-mirovoj-vojne-perezhili-pervuju.html">Как Гитлер, Сталин и Черчилль, противостоявшие друг другу во Второй мировой войне, пережили Первую</a>
+	<span class="row-item-date">24 май 2019, Пятница</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/284-mozayika-jaka-rozsipayetsja-mabut-uzhe-n.html">Мозаїка, яка розсипається? Мабуть, уже ні</a>
+	<span class="row-item-date">23 май 2019, Четверг</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/318-tjuremnye-ponjatija-sootvetstvujut-hristianskim-zapovedjam.html">Тюремные понятия соответствуют христианским заповедям</a>
+	<span class="row-item-date">16 май 2019, Четверг</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/317-pohvala-sportivnj-kras.html">Похвала спортивній красі</a>
+	<span class="row-item-date">25 апрель 2019, Четверг</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/560-ukrayina-kriza-rusistiki-vkljuchene-sposterezhennja-za-storichnim-procesom.html">Україна і криза &quot;русистики&quot;: включене спостереження за історичним процесом</a>
+	<span class="row-item-date">24 апрель 2019, Среда</span>
+</div><div class="row-item">
+	<a class="row-item-link" href="http://polit.ua/analitics/283-gtler-proti-stalna-hto-buv-grshij.html">Гітлер проти Сталіна: хто був гірший?</a>
+	<span class="row-item-date">23 апрель 2019, Вторник</span>
+</div>
+					</div>
+				</div>
+
+		
+				<div class="sect">
+					<div class="sect-t fx-row fx-middle">
+						<h2>Лекции</h2>
+						<div class="sect-links icon-l">
+							<a href="/lec/"><span class="fa fa-plus"></span>Ссылка</a>
+						</div>
+					</div>
+					<div class="sect-c fx-row">
+						<div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/lec/457-fizika-na-kuhne.html"><img src="/uploads/posts/2020-01/thumbs/1579709994_54.jpg" alt="Физика на кухне" /></a>
+	<div class="side-item-date">22 август 2019, Четверг</div>
+	<a class="side-item-link" href="http://polit.ua/lec/457-fizika-na-kuhne.html">Физика на кухне</a>
+</div><div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/lec/260-sovremennaja-literatura-i-internet.html"><img src="/uploads/posts/2019-11/thumbs/1574115360_8.jpg" alt="Современная литература и Интернет" /></a>
+	<div class="side-item-date">19 август 2019, Понедельник</div>
+	<a class="side-item-link" href="http://polit.ua/lec/260-sovremennaja-literatura-i-internet.html">Современная литература и Интернет</a>
+</div><div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/lec/259-uroki-reformy-rossijskogo-zdravoohranenija.html"><img src="/uploads/posts/2019-11/thumbs/1574114306_7.jpg" alt="Уроки реформы российского здравоохранения" /></a>
+	<div class="side-item-date">18 август 2019, Воскресенье</div>
+	<a class="side-item-link" href="http://polit.ua/lec/259-uroki-reformy-rossijskogo-zdravoohranenija.html">Уроки реформы российского здравоохранения</a>
+</div><div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/lec/397-duhovnij-vishkl-gulagu.html"><img src="/uploads/posts/2019-12/thumbs/1576262309_31.jpg" alt="«Духовний вишкіл ГУЛАГу»" /></a>
+	<div class="side-item-date">13 август 2019, Вторник</div>
+	<a class="side-item-link" href="http://polit.ua/lec/397-duhovnij-vishkl-gulagu.html">«Духовний вишкіл ГУЛАГу»</a>
+</div><div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/lec/396-ukrainskaja-kompjuternaja-lingvistika-segodnja.html"><img src="/uploads/posts/2019-12/thumbs/1576192596_21.jpg" alt="&quot;Украинская компьютерная лингвистика сегодня&quot;" /></a>
+	<div class="side-item-date">13 август 2019, Вторник</div>
+	<a class="side-item-link" href="http://polit.ua/lec/396-ukrainskaja-kompjuternaja-lingvistika-segodnja.html">&quot;Украинская компьютерная лингвистика сегодня&quot;</a>
+</div><div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/lec/426-mikulovo-bezdnoe-slovo.html"><img src="/uploads/posts/2020-01/thumbs/1578175339_52.jpg" alt="&quot;Микулово бездное слово...&quot;" /></a>
+	<div class="side-item-date">05 август 2019, Понедельник</div>
+	<a class="side-item-link" href="http://polit.ua/lec/426-mikulovo-bezdnoe-slovo.html">&quot;Микулово бездное слово...&quot;</a>
+</div>
+					</div>
+				</div>
+
+
+				
+				
+			</main>
+			
+			<!-- END MAIN -->
+			
+			<aside class="side-right">
+			
+				<div class="side-box side-grey">
+					<div class="side-bt">Политика</div>
+					<div class="side-bc">
+						<div class="side-item">
+	<div class="side-item-date">09 январь 2026, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2038-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості</a>
+</div><div class="side-item">
+	<div class="side-item-date">09 январь 2026, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2037-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості</a>
+</div><div class="side-item">
+	<div class="side-item-date">23 октябрь 2025, Четверг</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2036-kak-poisk-raboty-sdelat-udobnym-i-rezultativnym.html">Как поиск работы сделать удобным и результативным</a>
+</div><div class="side-item">
+	<div class="side-item-date">22 октябрь 2025, Среда</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2035-kak-onlajn-kurs-po-buhgalterii-pomogaet-vladelcu-malogo-biznesa-prinimat-uverennye-reshenija.html">Как онлайн-курс по бухгалтерии помогает владельцу малого бизнеса принимать уверенные решения</a>
+</div><div class="side-item">
+	<div class="side-item-date">16 сентябрь 2025, Вторник</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2034-jak-gri-v-stil-crash-peretvorili-rizik-na-format-dlja-shanovnihh.html">Як ігри в стилі crash перетворили ризик на формат для шановних</a>
+</div><div class="side-item">
+	<div class="side-item-date">14 сентябрь 2025, Воскресенье</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2033-vzgljad-na-igry-v-stile-crashh.html">Взгляд на игры в стиле crash</a>
+</div><div class="side-item">
+	<div class="side-item-date">05 сентябрь 2025, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2032-kak-uznat-ripple-skolko-stoit-i-prinjat-reshenie-delovoj-razbor.html">Как узнать Ripple сколько стоит и принять решение – деловой разбор</a>
+</div>
+					</div>
+				</div>
+				
+				<div class="side-box">
+					<div class="side-bt">Экономика</div>
+					<div class="side-bc">
+						<div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/ekonomika/28-deputaty-obratilis-v-njek-otnositelno-cenzury-v-internete.html"><img src="/uploads/posts/2019-10/thumbs/1571932681_14.jpg" alt="Депутаты обратились в НЭК относительно цензуры в интернете" /></a>
+	<div class="side-item-date">15 февраль 2020, Суббота</div>
+	<a class="side-item-link" href="http://polit.ua/ekonomika/28-deputaty-obratilis-v-njek-otnositelno-cenzury-v-internete.html">Депутаты обратились в НЭК относительно цензуры в интернете</a>
+</div><div class="side-item side-item2">
+	<a class="side-item-img img-resp-h" href="http://polit.ua/ekonomika/27-tabachnik-bolonskaja-sistema-dlja-nas-ne-bolee-chem-chinovnichi-igry.html"><img src="/uploads/posts/2019-10/thumbs/1571932574_25.jpg" alt="Табачник: Болонская система для нас - не более чем чиновничьи игры" /></a>
+	<div class="side-item-date">22 октябрь 2019, Вторник</div>
+	<a class="side-item-link" href="http://polit.ua/ekonomika/27-tabachnik-bolonskaja-sistema-dlja-nas-ne-bolee-chem-chinovnichi-igry.html">Табачник: Болонская система для нас - не более чем чиновничьи игры</a>
+</div>
+					</div>
+				</div>
+				
+				<div class="side-box side-grey">
+					<div class="side-bt">Статьи</div>
+					<div class="side-bc">
+						<div class="side-item">
+	<div class="side-item-date">09 январь 2026, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2038-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості</a>
+</div><div class="side-item">
+	<div class="side-item-date">09 январь 2026, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2037-jak-shvidko-zaluchiti-koshti-na-termnov-bznes-zavdannja-za-dopomogoju-kreditu-pd-zastavu-neruhomost.html">Як швидко залучити кошти на термінові бізнес-завдання за допомогою кредиту під заставу нерухомості</a>
+</div><div class="side-item">
+	<div class="side-item-date">23 октябрь 2025, Четверг</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2036-kak-poisk-raboty-sdelat-udobnym-i-rezultativnym.html">Как поиск работы сделать удобным и результативным</a>
+</div><div class="side-item">
+	<div class="side-item-date">22 октябрь 2025, Среда</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2035-kak-onlajn-kurs-po-buhgalterii-pomogaet-vladelcu-malogo-biznesa-prinimat-uverennye-reshenija.html">Как онлайн-курс по бухгалтерии помогает владельцу малого бизнеса принимать уверенные решения</a>
+</div><div class="side-item">
+	<div class="side-item-date">16 сентябрь 2025, Вторник</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2034-jak-gri-v-stil-crash-peretvorili-rizik-na-format-dlja-shanovnihh.html">Як ігри в стилі crash перетворили ризик на формат для шановних</a>
+</div><div class="side-item">
+	<div class="side-item-date">14 сентябрь 2025, Воскресенье</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2033-vzgljad-na-igry-v-stile-crashh.html">Взгляд на игры в стиле crash</a>
+</div><div class="side-item">
+	<div class="side-item-date">05 сентябрь 2025, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2032-kak-uznat-ripple-skolko-stoit-i-prinjat-reshenie-delovoj-razbor.html">Как узнать Ripple сколько стоит и принять решение – деловой разбор</a>
+</div><div class="side-item">
+	<div class="side-item-date">18 август 2025, Понедельник</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2031-detalno-pro-vidi-ta-priznachennja-faneri.html">Детально про види та призначення фанери</a>
+</div><div class="side-item">
+	<div class="side-item-date">10 август 2025, Воскресенье</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2026-samye-vpechatlyayushchie-hramy-v-goa.html">Самые впечатляющие храмы в Гоа</a>
+</div><div class="side-item">
+	<div class="side-item-date">25 июль 2025, Пятница</div>
+	<a class="side-item-link" href="http://polit.ua/articles/2025-agentskie-reklamnye-akkaunty-tiktok-chto-jeto-dlja-kogo-i-v-chem-preimuschestva.html">Агентские рекламные аккаунты TikTok: что это, для кого и в чем преимущества</a>
+</div>
+					</div>
+				</div>
+				
+			</aside>
+			
+			<!-- END SIDE-RIGHT -->
+			
+		</div>
+		
+		<!-- END COLS -->
+		
+	
+		<!-- END BOTTOM -->
+	
+	</div>
+
+
+	<!-- END BLOCK CENTER -->
+	
+	<footer class="footer center">
+		<div class="footer-cols fx-row">
+			<div class="ft-col">
+
+				<ul class="ft-menu">
+					<li><a href="/news/">Новости</a></li>
+					<li><a href="/ekonomika/">Экономика</a></li>
+					<li><a href="/religiya/">Религия</a></li>
+				</ul>
+			</div>
+			<div class="ft-col">
+
+				<ul class="ft-menu">
+					<li><a href="/culture/">Культура</a></li>
+					<li><a href="/science/">Наука</a></li>
+					<li><a href="/foto/">Фоторепортажи</a></li>
+
+				</ul>
+			</div>
+			<div class="ft-col">
+
+				<ul class="ft-menu">
+					<li><a href="/articles/">Статьи</a></li>
+					<li><a href="/nations/">Страны</a></li>
+					<li><a href="/lec/">Лекции</a></li>
+					<li><a href="/analitics/">Аналитика</a></li>
+					<li><a href="/doc/">Документы</a></li>
+				</ul>
+			</div>
+			<div class="ft-col">
+
+				<ul class="ft-menu">
+					<li><a href="/sitemap.xml">Карта сайта</a></li>
+					<li><a href="/about.html">О Проекте</a></li>
+					<li><a href="/?do=feedback">Контакты</a></li>
+             
+				</ul>
+			</div>
+		</div>
+		<div class="footer-in">
+
+© <a href="/">Полит.UA</a>
+<br><br> 
+Электронная почта: info@polit.ua
+<br><br>
+Телефон:<br> 
++38 (044) 256-5656, +38 (068) 356-5656
+<br>
+Звонок бесплатный
+<br><br>
+
+Адрес: г. Киев, ул. Пушкинская, 1-3/5, оф.43
+
+<br><br> 
+При любом использовании материалов веб-сайта ссылка на Полiт.ua обязательна.
+<br> 
+При перепечатке в Интернете обязательна гиперссылка www.polit.ua.
+<br>
+Все права защищены и охраняются законом.
+<br><br> 
+© 2009 – 2020
+            
+			<div class="counter">
+<!--LiveInternet counter--><script type="text/javascript">
+document.write('<a href="//www.liveinternet.ru/click" '+
+'target="_blank"><img src="//counter.yadro.ru/hit?t26.13;r'+
+escape(document.referrer)+((typeof(screen)=='undefined')?'':
+';s'+screen.width+'*'+screen.height+'*'+(screen.colorDepth?
+screen.colorDepth:screen.pixelDepth))+';u'+escape(document.URL)+
+';h'+escape(document.title.substring(0,150))+';'+Math.random()+
+'" alt="" title="LiveInternet: показано число посетителей за'+
+' сегодня" '+
+'border="0" width="88" height="15"><\/a>')
+</script><!--/LiveInternet-->
+
+                
+<!-- Yandex.Metrika informer -->
+<a href="https://metrika.yandex.ru/stat/?id=55902082&amp;from=informer"
+target="_blank" rel="nofollow"><img src="https://informer.yandex.ru/informer/55902082/3_0_FFFFFFFF_EFEFEFFF_0_pageviews"
+style="width:88px; height:31px; border:0;" alt="Яндекс.Метрика" title="Яндекс.Метрика: данные за сегодня (просмотры, визиты и уникальные посетители)" class="ym-advanced-informer" data-cid="55902082" data-lang="ru" /></a>
+<!-- /Yandex.Metrika informer -->
+
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript" >
+   (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+   m[i].l=1*new Date();k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+   (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+
+   ym(55902082, "init", {
+        clickmap:true,
+        trackLinks:true,
+        accurateTrackBounce:true
+   });
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/55902082" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
+
+			</div>
+		</div>
+	</footer>
+	
+	<!-- END FOOTER -->
+	
+</div>
+
+<!-- END WRAP -->
+
+<!--noindex-->
+
+
+	<div class="login-box" id="login-box" title="Авторизация">
+		<form method="post">
+			<input type="text" name="login_name" id="login_name" placeholder="Ваш логин"/>
+			<input type="password" name="login_password" id="login_password" placeholder="Ваш пароль" />
+			<button onclick="submit();" type="submit" title="Вход">Войти на сайт</button>
+			<input name="login" type="hidden" id="login" value="submit" />
+			<div class="lb-check">
+				<input type="checkbox" name="login_not_save" id="login_not_save" value="1"/>
+				<label for="login_not_save">Не запоминать меня</label> 
+			</div>
+			<div class="lb-lnk fx-row">
+				<a href="http://polit.ua/index.php?do=lostpassword">Забыли пароль?</a>
+				<a href="/?do=register" class="log-register">Регистрация</a>
+			</div>
+		</form>
+	
+		
+		
+		
+		
+		
+		
+	
+	</div>
+
+<!--/noindex-->  
+<link href="/engine/editor/css/default.css?v=25" rel="stylesheet" type="text/css">
+<script src="/engine/classes/js/jquery.js?v=25"></script>
+<script src="/engine/classes/js/jqueryui.js?v=25" defer></script>
+<script src="/engine/classes/js/dle_js.js?v=25" defer></script>
+<script src="/templates/polit/js/libs.js"></script>
+<script>
+<!--
+var dle_root       = '/';
+var dle_admin      = '';
+var dle_login_hash = 'c19a56c1567a5e61560afeae49567f7d22b65a3f';
+var dle_group      = 5;
+var dle_skin       = 'polit';
+var dle_wysiwyg    = '1';
+var quick_wysiwyg  = '1';
+var dle_act_lang   = ["Да", "Нет", "Ввод", "Отмена", "Сохранить", "Удалить", "Загрузка. Пожалуйста, подождите..."];
+var menu_short     = 'Быстрое редактирование';
+var menu_full      = 'Полное редактирование';
+var menu_profile   = 'Просмотр профиля';
+var menu_send      = 'Отправить сообщение';
+var menu_uedit     = 'Админцентр';
+var dle_info       = 'Информация';
+var dle_confirm    = 'Подтверждение';
+var dle_prompt     = 'Ввод информации';
+var dle_req_field  = 'Заполните все необходимые поля';
+var dle_del_agree  = 'Вы действительно хотите удалить? Данное действие невозможно будет отменить';
+var dle_spam_agree = 'Вы действительно хотите отметить пользователя как спамера? Это приведёт к удалению всех его комментариев';
+var dle_complaint  = 'Укажите текст Вашей жалобы для администрации:';
+var dle_big_text   = 'Выделен слишком большой участок текста.';
+var dle_orfo_title = 'Укажите комментарий для администрации к найденной ошибке на странице';
+var dle_p_send     = 'Отправить';
+var dle_p_send_ok  = 'Уведомление успешно отправлено';
+var dle_save_ok    = 'Изменения успешно сохранены. Обновить страницу?';
+var dle_reply_title= 'Ответ на комментарий';
+var dle_tree_comm  = '0';
+var dle_del_news   = 'Удалить статью';
+var dle_sub_agree  = 'Вы действительно хотите подписаться на комментарии к данной публикации?';
+var allow_dle_delete_news   = false;
+
+//-->
+</script>  
+<script src="/templates/polit/js/share.js" charset="utf-8"></script>
+	  
+</body>
+</html>
+
+<!-- DataLife Engine Copyright SoftNews Media Group (http://dle-news.ru) -->
