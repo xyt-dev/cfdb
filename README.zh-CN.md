@@ -2,6 +2,8 @@
 
 [English](README.md) · **中文**
 
+![](vendor/screenshot.png)
+
 全本地化的 Codeforces 题目数据库 + 内置网页。离线浏览 **11k+ 道题**、题面与题解——零 CDN、无需账号、局域网可用。
 
 ## 功能

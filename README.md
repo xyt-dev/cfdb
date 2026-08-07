@@ -2,6 +2,8 @@
 
 **English** · [中文](README.zh-CN.md)
 
+![](vendor/screenshot.png)
+
 A fully-local Codeforces problem database with a built-in web UI. Browse **11k+ problems**, read statements and editorials offline — no CDN, no account, works on your LAN.
 
 ## Features
