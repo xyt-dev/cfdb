@@ -29,7 +29,7 @@ A fully-local Codeforces problem database with a built-in web UI. Browse **11k+ 
 
 ```bash
 # Code only (no data) — data lives on the `snapshot` branch
-git clone https://github.com/<your-username>/cfdb.git
+git clone https://github.com/xyt-dev/cfdb.git
 cd cfdb
 python3 server.py          # start server (auto incremental crawl on startup)
 

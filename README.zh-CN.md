@@ -29,7 +29,7 @@
 
 ```bash
 # 仅代码（无数据）——数据在 snapshot 分支
-git clone https://github.com/<你的用户名>/cfdb.git
+git clone https://github.com/xyt-dev/cfdb.git
 cd cfdb
 python3 server.py          # 启动（启动时自动增量爬取）
 
