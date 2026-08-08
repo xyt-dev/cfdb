@@ -1695,13 +1695,24 @@
       }
 
       function mdFrame(md, url) {
-        // 下标还原：marked 把单 ~ 当删除线（GFM），html2md 的 <sub> → ~ 被渲染成 <del>
-        // → ~内容~（单波浪、前后非 ~）还原为 <sub>（双波浪 ~~ 真删除线不受影响）；
-        //   内容含 markdown 斜体 *x* 一并转 <em>（~*t*-1~ → <sub><em>t</em>-1</sub>）
+        // 下标/上标还原：marked 把单 ~ 当删除线、不解析 ^...^（显示字面）
+        // → 单波浪 ~内容~ 还原 <sub>、单波浪 ^内容^ 还原 <sup>（双波浪 ~~ 真删除线不受影响）
+        // 内容含 markdown 斜体 *x* 一并转 <em>（~*t*-1~ → <sub><em>t</em>-1</sub>）
+        // 代码块/行内代码先占位保护——代码里的 ~/^（位运算等）不被误替换
+        const codeSpans = [];
+        md = md.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => {
+          codeSpans.push(m);
+          return "\u0000C" + (codeSpans.length - 1) + "\u0000";
+        });
         md = md.replace(/(?<!~)~([^~\n]+?)~(?!~)/g, (m, inner) => {
           inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
           return "<sub>" + inner + "</sub>";
         });
+        md = md.replace(/(?<!\^)\^([^^\n]+?)\^(?!\^)/g, (m, inner) => {
+          inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
+          return "<sup>" + inner + "</sup>";
+        });
+        md = md.replace(/\u0000C(\d+)\u0000/g, (m, i) => codeSpans[+i]);
         let html;
         try {
           html = window.marked ? marked.parse(protectMathContent(md)) : null;

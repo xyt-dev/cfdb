@@ -165,7 +165,8 @@ class Html2Md(HTMLParser):
             # 输出 raw <sub>（marked 保留渲染下标；~ 会被 marked 当删除线）
             self.out.append("<sub>")
         elif tag == "sup":
-            self.out.append("^")
+            # 输出 raw <sup>（marked 不解析 ^...^）
+            self.out.append("<sup>")
         elif tag == "ul":
             self.out.append("\n")
 
@@ -238,7 +239,7 @@ class Html2Md(HTMLParser):
         elif tag == "sub":
             self.out.append("</sub>")
         elif tag == "sup":
-            self.out.append("^")
+            self.out.append("</sup>")
 
     def handle_data(self, data):
         if self._skip_depth > 0:
