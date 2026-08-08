@@ -1704,6 +1704,12 @@
           codeSpans.push(m);
           return "\u0000C" + (codeSpans.length - 1) + "\u0000";
         });
+        // 公式段也占位保护——$a^k$ 等公式里的 ^（幂）不能被当成上标标记替换
+        const mathSpans = [];
+        md = md.replace(/(\$\$[\s\S]*?\$\$)|((?<!\$)\$[^\n]*?\$)/g, (m) => {
+          mathSpans.push(m);
+          return "\u0000M" + (mathSpans.length - 1) + "\u0000";
+        });
         md = md.replace(/(?<!~)~([^~\n]+?)~(?!~)/g, (m, inner) => {
           inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
           return "<sub>" + inner + "</sub>";
@@ -1712,6 +1718,7 @@
           inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
           return "<sup>" + inner + "</sup>";
         });
+        md = md.replace(/\u0000M(\d+)\u0000/g, (m, i) => mathSpans[+i]);
         md = md.replace(/\u0000C(\d+)\u0000/g, (m, i) => codeSpans[+i]);
         let html;
         try {
