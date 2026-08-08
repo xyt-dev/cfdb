@@ -162,7 +162,8 @@ class Html2Md(HTMLParser):
         elif tag == "code":
             self.out.append("`")
         elif tag == "sub":
-            self.out.append("~")
+            # 输出 raw <sub>（marked 保留渲染下标；~ 会被 marked 当删除线）
+            self.out.append("<sub>")
         elif tag == "sup":
             self.out.append("^")
         elif tag == "ul":
@@ -235,7 +236,7 @@ class Html2Md(HTMLParser):
         elif tag == "code":
             self.out.append("`")
         elif tag == "sub":
-            self.out.append("~")
+            self.out.append("</sub>")
         elif tag == "sup":
             self.out.append("^")
 

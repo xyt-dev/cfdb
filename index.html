@@ -1695,6 +1695,13 @@
       }
 
       function mdFrame(md, url) {
+        // 下标还原：marked 把单 ~ 当删除线（GFM），html2md 的 <sub> → ~ 被渲染成 <del>
+        // → ~内容~（单波浪、前后非 ~）还原为 <sub>（双波浪 ~~ 真删除线不受影响）；
+        //   内容含 markdown 斜体 *x* 一并转 <em>（~*t*-1~ → <sub><em>t</em>-1</sub>）
+        md = md.replace(/(?<!~)~([^~\n]+?)~(?!~)/g, (m, inner) => {
+          inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
+          return "<sub>" + inner + "</sub>";
+        });
         let html;
         try {
           html = window.marked ? marked.parse(protectMathContent(md)) : null;

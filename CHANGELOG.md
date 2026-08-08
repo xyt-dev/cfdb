@@ -25,6 +25,8 @@
 - **题解不再折叠**：删除 srcdoc 折叠逻辑（`details.fold` + KEYS 小节检测）——Solution/Hint/Tutorial 等小节直接展开显示（无需点击），题面不受影响
 - **透明图片白底增强**：`_flatten_transparent_png` 扩展——16-bit RGBA/gray+alpha、gray+tRNS（1/2/4/8/16-bit 拆位）、palette 低位尾字节越界修复（stride ceil 多出像素→写入越界）、RGB+tRNS 16-bit 解析；题解图存量 6260 个 + 题面图全部白底化（12612/12614，2 个损坏文件跳过）
 
+- **下标渲染为删除线修复**：marked 把单 `~` 当删除线（GFM）——html2md 的 `<sub>` 转 `~` 后下标（`~0~`、`~*t*-1~` 等）渲染成删除线 → 渲染前把单波浪 `~内容~` 还原为 `<sub>`（内容内 markdown 斜体 `*x*` 一并转 `<em>`；真删除线 `~~x~~` 不受影响）；html2md 的 `<sub>` 直接输出 raw HTML（新爬数据源头正确）
+
 ## [v2.4.0] - 2026-08-06
 
 ### 修复
