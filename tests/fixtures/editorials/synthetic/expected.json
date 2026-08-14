@@ -1,0 +1,1 @@
+{"requiredDiagnostics":["dropped-dangerous-subtree","recovered-close"],"excludedText":["SCRIPT_TEXT_MUST_NOT_SURVIVE","FORM_TEXT_MUST_NOT_SURVIVE","comment must not enter editorial"],"requiredText":["safe text","INNER_BODY"]}
