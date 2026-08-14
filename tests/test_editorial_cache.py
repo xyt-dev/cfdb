@@ -213,6 +213,33 @@ class EditorialCacheTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_active_document(root, "1700")
 
+    def test_validated_active_generation_reuses_pointer_and_manifest_digest_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self.create_store(root, "g1", ["1700"])
+            self.ready_contest(store, make_document())
+            store.write_manifest()
+            activate_generation(root, "g1")
+
+            snapshot = editorial_cache.load_active_generation(root)
+            self.assertIsNotNone(snapshot)
+            assert snapshot is not None
+            self.assertEqual(snapshot.generation_id, "g1")
+
+            pointer_path = root / "current.json"
+            pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+            pointer_path.write_text(json.dumps(pointer, indent=2), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "canonical"):
+                editorial_cache.load_active_generation(root)
+
+            atomic_write_json(pointer_path, pointer)
+            manifest_path = store.path / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["fixtureVersion"] = "changed-but-valid"
+            atomic_write_json(manifest_path, manifest)
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                editorial_cache.load_active_generation(root)
+
     def test_failed_atomic_write_leaves_previous_document_visible(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "document.json"

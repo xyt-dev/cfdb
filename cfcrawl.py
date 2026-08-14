@@ -6,7 +6,9 @@
 """
 import copy
 from dataclasses import dataclass
+from pathlib import Path
 import errno
+import hashlib
 import json
 import os
 import re
@@ -732,9 +734,45 @@ def _fsync_asset_directory(directory: str) -> None:
         os.close(descriptor)
 
 
+def _prepare_editorial_asset_payload(
+    payload: bytes,
+    extension: str,
+    directory: str,
+) -> bytes:
+    if extension != ".png":
+        return payload
+    os.makedirs(directory, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".editorial-asset-normalize.",
+        suffix=".tmp",
+        dir=directory,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        _flatten_transparent_png(temporary)
+        return Path(temporary).read_bytes()
+    finally:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+
+
 def _atomic_write_editorial_asset(target: str, payload: bytes) -> None:
     directory = os.path.dirname(target)
     os.makedirs(directory, exist_ok=True)
+    try:
+        existing = Path(target).read_bytes()
+    except FileNotFoundError:
+        existing = None
+    if existing is not None and (
+        hashlib.sha256(existing).digest() == hashlib.sha256(payload).digest()
+        and existing == payload
+    ):
+        return
     descriptor, temporary = tempfile.mkstemp(
         prefix=f".{os.path.basename(target)}.",
         suffix=".tmp",
@@ -745,11 +783,6 @@ def _atomic_write_editorial_asset(target: str, payload: bytes) -> None:
             output.write(payload)
             output.flush()
             os.fsync(output.fileno())
-        if target.lower().endswith(".png"):
-            _flatten_transparent_png(temporary)
-            with open(temporary, "rb+") as output:
-                output.flush()
-                os.fsync(output.fileno())
         os.replace(temporary, target)
         _fsync_asset_directory(directory)
     except BaseException:
@@ -810,9 +843,6 @@ def localize_editorial_assets(
                 return missing_asset(node, source, path)
             if extension not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
                 extension = ".png"
-            name = f"{localized.contest_id}_{image_number}{extension}"
-            target = os.path.join(image_dir, name)
-            route = f"/eimages/{name}"
             try:
                 payload = image_fetcher(source)
             except Exception:
@@ -827,7 +857,16 @@ def localize_editorial_assets(
                     )
                 )
             try:
-                _atomic_write_editorial_asset(target, payload)
+                prepared_payload = _prepare_editorial_asset_payload(
+                    payload,
+                    extension,
+                    image_dir,
+                )
+                digest = hashlib.sha256(prepared_payload).hexdigest()
+                name = f"{localized.contest_id}_{image_number}_{digest}{extension}"
+                target = os.path.join(image_dir, name)
+                route = f"/eimages/{name}"
+                _atomic_write_editorial_asset(target, prepared_payload)
             except OSError:
                 raise _TransientAssetError(
                     Diagnostic(
