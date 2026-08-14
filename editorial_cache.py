@@ -682,10 +682,10 @@ def _activate_generation_locked(root_path: Path, generation_id: str) -> dict[str
     return pointer
 
 
-def load_active_document(
+def load_active_generation(
     root: str | os.PathLike[str],
-    contest_id: str,
-) -> EditorialDocument | None:
+) -> GenerationStore | None:
+    """Return the canonical, digest-validated active generation snapshot."""
     root_path = Path(root)
     pointer = _read_pointer(root_path)
     if pointer is None:
@@ -698,6 +698,16 @@ def load_active_document(
     store = GenerationStore._from_manifest(root_path, generation_id, manifest)
     if store.manifest["finalizedAt"] is None:
         raise ValueError("active generation is not finalized")
+    return store
+
+
+def load_active_document(
+    root: str | os.PathLike[str],
+    contest_id: str,
+) -> EditorialDocument | None:
+    store = load_active_generation(root)
+    if store is None:
+        return None
     entry = store.manifest["contests"].get(str(contest_id))
     if not isinstance(entry, dict) or entry.get("status") != ContestStatus.READY.value:
         return None

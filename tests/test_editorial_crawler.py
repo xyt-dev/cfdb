@@ -1,4 +1,5 @@
 import errno
+import hashlib
 import json
 import tempfile
 import unittest
@@ -13,7 +14,12 @@ from cfcrawl import (
     fetch_editorial_v2,
     localize_editorial_assets,
 )
-from editorial_cache import ContestStatus
+from editorial_cache import (
+    ContestStatus,
+    GenerationStore,
+    activate_generation,
+    load_active_document,
+)
 from editorial_model import EditorialDocument, Node, validate_document
 
 
@@ -196,6 +202,76 @@ class EditorialCrawlerTests(unittest.TestCase):
         self.assertIsNone(result.document)
         self.assertEqual(result.evidence["error"], "problem-code-mismatch:1700A:1700B")
 
+    def test_inactive_generation_assets_do_not_overwrite_active_asset_bytes(self):
+        source_url = "https://codeforces.com/images/shared-slot.png"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image_dir = root / "images"
+            cache_root = root / "v2"
+
+            active_result = localize_editorial_assets(
+                document_with_image(source_url),
+                image_dir=str(image_dir),
+                image_fetcher=lambda _url: b"ACTIVE_IMAGE_A",
+            )
+            self.assertIs(active_result.status, ContestStatus.READY)
+            assert active_result.document is not None
+            active_route = active_result.document.root.children[0].attrs["src"]
+            active_asset = image_dir / Path(active_route).name
+
+            active_store = GenerationStore.create(
+                cache_root,
+                "active",
+                ["1700"],
+                parser_version="parser-1",
+                fixture_version="fixtures-1",
+            )
+            active_path = active_store.write_document(active_result.document)
+            active_store.set_status(
+                "1700",
+                ContestStatus.READY,
+                evidence={"validatedAt": "2026-08-14T10:00:00Z"},
+                document_path=active_path,
+            )
+            active_store.write_manifest()
+            activate_generation(cache_root, "active")
+
+            inactive_result = localize_editorial_assets(
+                document_with_image(source_url),
+                image_dir=str(image_dir),
+                image_fetcher=lambda _url: b"INACTIVE_IMAGE_B",
+            )
+            self.assertIs(inactive_result.status, ContestStatus.READY)
+            assert inactive_result.document is not None
+            inactive_route = inactive_result.document.root.children[0].attrs["src"]
+            inactive_asset = image_dir / Path(inactive_route).name
+            inactive_store = GenerationStore.create(
+                cache_root,
+                "inactive",
+                ["1700", "9999"],
+                parser_version="parser-1",
+                fixture_version="fixtures-1",
+            )
+            inactive_path = inactive_store.write_document(inactive_result.document)
+            inactive_store.set_status(
+                "1700",
+                ContestStatus.READY,
+                evidence={"validatedAt": "2026-08-14T10:00:10Z"},
+                document_path=inactive_path,
+            )
+            inactive_store.set_status(
+                "9999",
+                ContestStatus.TRANSIENT_FAILURE,
+                evidence={"error": "keep generation inactive"},
+            )
+            inactive_store.write_manifest()
+
+            still_active = load_active_document(cache_root, "1700")
+            assert still_active is not None
+            self.assertEqual(still_active.root.children[0].attrs["src"], active_route)
+            self.assertNotEqual(inactive_route, active_route)
+            self.assertEqual(active_asset.read_bytes(), b"ACTIVE_IMAGE_A")
+            self.assertEqual(inactive_asset.read_bytes(), b"INACTIVE_IMAGE_B")
     def test_localize_assets_rewrites_only_after_atomic_download(self):
         document = document_with_image("https://codeforces.com/images/diagram.png")
 
@@ -213,14 +289,16 @@ class EditorialCrawlerTests(unittest.TestCase):
                 image_dir=directory,
                 image_fetcher=fetch_image,
             )
-            target = Path(directory) / "1700_1.png"
+            digest = hashlib.sha256(b"PNG_ASSET_SENTINEL").hexdigest()
+            route = f"/eimages/1700_1_{digest}.png"
+            target = Path(directory) / Path(route).name
 
             self.assertEqual(target.read_bytes(), b"PNG_ASSET_SENTINEL")
             self.assertIs(result.status, ContestStatus.READY)
             assert result.document is not None
-            self.assertEqual(result.document.root.children[0].attrs["src"], "/eimages/1700_1.png")
+            self.assertEqual(result.document.root.children[0].attrs["src"], route)
             self.assertEqual(document.root.children[0].attrs["src"], "https://codeforces.com/images/diagram.png")
-            self.assertEqual(result.document.assets, ["/eimages/1700_1.png"])
+            self.assertEqual(result.document.assets, [route])
 
             blocked_directory = Path(directory) / "not-a-directory"
             blocked_directory.write_bytes(b"existing-file")
@@ -245,7 +323,11 @@ class EditorialCrawlerTests(unittest.TestCase):
         document = document_with_image("https://codeforces.com/images/diagram.png")
 
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "1700_1.png"
+            payload = b"VERIFIED_REPLACEMENT_ASSET"
+            digest = hashlib.sha256(payload).hexdigest()
+            name = f"1700_1_{digest}.png"
+            route = f"/eimages/{name}"
+            target = Path(directory) / name
             target.write_bytes(b"CORRUPT_PREEXISTING_ASSET")
 
             def fetch_image(url: str) -> bytes:
@@ -268,11 +350,11 @@ class EditorialCrawlerTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"VERIFIED_REPLACEMENT_ASSET")
             self.assertEqual(
                 result.document.root.children[0].attrs["src"],
-                "/eimages/1700_1.png",
+                route,
             )
             self.assertEqual(
                 sorted(path.name for path in Path(directory).iterdir()),
-                ["1700_1.png"],
+                [name],
             )
 
     def test_directory_fsync_ignores_only_explicitly_unsupported_errors(self):
@@ -452,9 +534,13 @@ class EditorialCrawlerTests(unittest.TestCase):
                 title_nodes.append(Node.from_dict(value))
             title_images = [node for title in title_nodes for node in walk(title) if node.kind == "image"]
             all_images = [*title_images, *images]
+            digest = hashlib.sha256(b"ASSET_SENTINEL").hexdigest()
             self.assertEqual(
                 [node.attrs["src"] for node in all_images],
-                ["/eimages/1700_1.png", "/eimages/1700_2.webp"],
+                [
+                    f"/eimages/1700_1_{digest}.png",
+                    f"/eimages/1700_2_{digest}.webp",
+                ],
             )
             self.assertEqual(validate_document(result.document, ready=True), [])
             self.assertFalse(

@@ -1,4 +1,5 @@
 import contextlib
+import hashlib
 import io
 import json
 import tempfile
@@ -8,7 +9,13 @@ from unittest.mock import patch
 
 import cfcrawl
 from cfcrawl import EditorialBuildResult, TutorialBatch
-from editorial_cache import ContestStatus, GenerationStore, activate_generation
+from editorial_cache import (
+    ContestStatus,
+    GenerationStore,
+    activate_generation,
+    atomic_write_json,
+    load_active_document,
+)
 from editorial_model import EditorialDocument, Node
 from editorial_rebuild import (
     FIXTURE_VERSION,
@@ -42,6 +49,61 @@ def make_document(contest_id: str, body: str = "ready") -> EditorialDocument:
             children=[Node(kind="paragraph", children=[Node(kind="text", text=body)])],
         ),
     )
+
+
+def checked_absence(first=TIMES[0], second=TIMES[1]):
+    return {
+        "successfulCheckTimestamps": [first, second],
+        "contestPageReceipts": [
+            {
+                "fetchedAt": first,
+                "recognized": True,
+                "editorialFound": False,
+                "tutorialFound": False,
+            },
+            {
+                "fetchedAt": second,
+                "recognized": True,
+                "editorialFound": False,
+                "tutorialFound": False,
+            },
+        ],
+    }
+
+
+def create_ready_generation(
+    root: Path,
+    generation_id: str,
+    body: str,
+    *,
+    contests=("1700", "9999"),
+    activate=False,
+):
+    store = GenerationStore.create(
+        root,
+        generation_id,
+        contests,
+        parser_version=PARSER_VERSION,
+        fixture_version=FIXTURE_VERSION,
+    )
+    document_path = store.write_document(make_document("1700", body))
+    store.set_status(
+        "1700",
+        ContestStatus.READY,
+        evidence={"validatedAt": TIMES[0]},
+        document_path=document_path,
+    )
+    for contest_id in contests:
+        if contest_id != "1700":
+            store.set_status(
+                contest_id,
+                ContestStatus.KNOWN_ABSENT,
+                evidence=checked_absence(),
+            )
+    store.write_manifest()
+    if activate:
+        activate_generation(root, generation_id)
+    return store
 
 
 class FixtureEditorialSource:
@@ -106,7 +168,10 @@ class EditorialRebuildTests(unittest.TestCase):
             self.assertEqual(report["matchedSentinels"], LIVE_1700_SENTINELS)
             self.assertEqual(report["unresolvedSlots"], [])
             self.assertEqual(report["validationErrors"], [])
-            self.assertEqual(len(report["canonicalJsonSha256"]), 64)
+            digest = report["canonicalJsonSha256"]
+            self.assertIsNotNone(digest)
+            assert digest is not None
+            self.assertEqual(len(digest), 64)
             self.assertFalse((root / "current.json").exists())
             self.assertFalse(root.exists())
 
@@ -274,6 +339,127 @@ class EditorialRebuildTests(unittest.TestCase):
             self.assertFalse(report["activated"])
             self.assertEqual(store.manifest["contests"]["1700"]["status"], "transient_failure")
             self.assertEqual(json.loads((root / "current.json").read_text())["generationId"], "base")
+
+    def test_stale_incremental_is_never_resumed_after_newer_activation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "v2"
+            create_ready_generation(root, "base", "ACTIVE_A", activate=True)
+
+            stale_source = FixtureEditorialSource()
+            stale_source.transient_contests.add("9999")
+            stale = update_editorials(
+                source=stale_source,
+                cache_root=root,
+                generation_id="update-stale",
+                sleep_fn=lambda _delay: None,
+            )
+            self.assertFalse(stale["activated"])
+            self.assertEqual(
+                GenerationStore.open(root, "update-stale").load_document("1700"),
+                make_document("1700", "ACTIVE_A"),
+            )
+
+            create_ready_generation(root, "newer", "ACTIVE_B", activate=True)
+            source = FixtureEditorialSource()
+            with self.assertRaisesRegex(ValueError, "incremental generation already exists"):
+                update_editorials(
+                    source=source,
+                    cache_root=root,
+                    generation_id="update-stale",
+                    sleep_fn=lambda _delay: None,
+                )
+            self.assertEqual(
+                load_active_document(root, "1700"),
+                make_document("1700", "ACTIVE_B"),
+            )
+
+            successor = update_editorials(
+                source=source,
+                cache_root=root,
+                sleep_fn=lambda _delay: None,
+            )
+            self.assertNotEqual(successor["generationId"], "update-stale")
+            self.assertTrue(successor["activated"])
+            self.assertEqual(
+                load_active_document(root, "1700"),
+                make_document("1700", "ACTIVE_B"),
+            )
+
+    def test_incremental_fails_closed_on_noncanonical_or_digest_mismatched_active(self):
+        for corruption in ("noncanonical-pointer", "manifest-digest"):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "v2"
+                store = create_ready_generation(root, "active", "ACTIVE", activate=True)
+                pointer_path = root / "current.json"
+                if corruption == "noncanonical-pointer":
+                    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+                    pointer_path.write_text(json.dumps(pointer, indent=2), encoding="utf-8")
+                else:
+                    manifest_path = store.path / "manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["fixtureVersion"] = "changed-but-valid"
+                    atomic_write_json(manifest_path, manifest)
+
+                before_generations = sorted(path.name for path in (root / "generations").iterdir())
+                with self.assertRaises(ValueError):
+                    update_editorials(
+                        source=FixtureEditorialSource(),
+                        cache_root=root,
+                        sleep_fn=lambda _delay: None,
+                    )
+                self.assertEqual(
+                    sorted(path.name for path in (root / "generations").iterdir()),
+                    before_generations,
+                )
+
+    def test_incremental_fails_closed_if_active_parent_drifts_before_activation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "v2"
+            create_ready_generation(
+                root,
+                "parent",
+                "ACTIVE_A",
+                contests=("1700",),
+                activate=True,
+            )
+            other = create_ready_generation(
+                root,
+                "unexpected",
+                "ACTIVE_B",
+                contests=("1700",),
+            )
+            manifest_bytes = (other.path / "manifest.json").read_bytes()
+            unexpected_pointer = {
+                "schema": 2,
+                "generationId": "unexpected",
+                "activatedAt": TIMES[2],
+                "manifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            }
+            pointer_path = root / "current.json"
+
+            class DriftingSource(FixtureEditorialSource):
+                def __init__(self):
+                    super().__init__(("1700",))
+                    self.changed = False
+
+                def fetch_contest_page(self, contest_id):
+                    if not self.changed:
+                        atomic_write_json(pointer_path, unexpected_pointer)
+                        self.changed = True
+                    return super().fetch_contest_page(contest_id)
+
+            with self.assertRaisesRegex(RuntimeError, "active generation changed"):
+                update_editorials(
+                    source=DriftingSource(),
+                    cache_root=root,
+                    generation_id="update-drift",
+                    requested_contests=["1700"],
+                    sleep_fn=lambda _delay: None,
+                )
+            self.assertEqual(
+                load_active_document(root, "1700"),
+                make_document("1700", "ACTIVE_B"),
+            )
 
     def test_resume_skips_ready_documents_in_same_generation(self):
         source = FixtureEditorialSource(("1700", "9999"))

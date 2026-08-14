@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
-import json
 import os
 from pathlib import Path
 import tempfile
@@ -19,6 +18,7 @@ from editorial_cache import (
     GenerationStore,
     RebuildLock,
     activate_generation,
+    load_active_generation,
 )
 from editorial_model import EditorialDocument, Node, canonical_json, validate_document
 from editorial_parser import ParseError, parse_blog_html
@@ -410,15 +410,6 @@ def _persist_result(
     store.write_manifest(lock=lock)
 
 
-def _current_generation_id(root: Path) -> str | None:
-    try:
-        pointer = json.loads((root / "current.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    generation_id = pointer.get("generationId") if isinstance(pointer, dict) else None
-    if not isinstance(generation_id, str) or not generation_id:
-        raise ValueError("active generation pointer is invalid")
-    return generation_id
 
 
 def _resumable_generation_id(
@@ -452,6 +443,17 @@ def _report(store: GenerationStore, activated: bool) -> GenerationReport:
     }
 
 
+def _same_generation_snapshot(
+    current: GenerationStore | None,
+    expected: GenerationStore,
+) -> bool:
+    return (
+        current is not None
+        and current.generation_id == expected.generation_id
+        and current.manifest == expected.manifest
+    )
+
+
 def _run_generation(
     *,
     source: EditorialSource,
@@ -462,14 +464,19 @@ def _run_generation(
     sleep_fn: Callable[[float], None],
     seed: GenerationStore | None = None,
     requested_contests: set[str] | None = None,
+    allow_resume: bool = False,
 ) -> GenerationReport:
     root = Path(cache_root)
     requested = requested_contests or set()
     with RebuildLock(root) as lock:
-        if seed is not None and _current_generation_id(root) != seed.generation_id:
-            raise RuntimeError("active generation changed before successor creation")
+        if seed is not None:
+            active_snapshot = load_active_generation(root)
+            if not _same_generation_snapshot(active_snapshot, seed):
+                raise RuntimeError("active generation changed before successor creation")
         generation_path = root / "generations" / generation_id
         if generation_path.exists():
+            if not allow_resume:
+                raise ValueError(f"incremental generation already exists: {generation_id}")
             store = GenerationStore.open(root, generation_id)
             if store.manifest["expectedContests"] != sorted(expected_contests):
                 raise ValueError("resumed generation contest set differs from problem metadata")
@@ -490,8 +497,8 @@ def _run_generation(
                     store.manifest["contests"].pop(contest_id, None)
 
         if store.manifest["finalizedAt"] is not None:
-            active_id = _current_generation_id(root)
-            if active_id != generation_id:
+            active_snapshot = load_active_generation(root)
+            if active_snapshot is None or active_snapshot.generation_id != generation_id:
                 activate_generation(root, generation_id, lock=lock)
             return _report(store, True)
 
@@ -528,6 +535,10 @@ def _run_generation(
         store = GenerationStore.open(root, generation_id)
         activated = False
         if store.manifest["finalizedAt"] is not None and store.is_activation_ready():
+            if seed is not None:
+                active_snapshot = load_active_generation(root)
+                if not _same_generation_snapshot(active_snapshot, seed):
+                    raise RuntimeError("active generation changed before successor activation")
             activate_generation(root, generation_id, lock=lock)
             activated = True
         return _report(store, activated)
@@ -553,6 +564,7 @@ def rebuild_editorials(
         expected_contests=expected,
         delay=delay,
         sleep_fn=sleep_fn,
+        allow_resume=True,
     )
 
 
@@ -568,10 +580,9 @@ def update_editorials(
     """Build an incremental successor without mutating the active generation."""
     editorial_source = _source_or_live(source)
     root = Path(cache_root) if cache_root is not None else Path(cfcrawl.EDITORIAL_DIR) / "v2"
-    active_id = _current_generation_id(root)
-    if active_id is None:
+    active = load_active_generation(root)
+    if active is None:
         raise RuntimeError("incremental editorial update requires an active v2 generation")
-    active = GenerationStore.open(root, active_id)
     metadata_contests = _contest_ids(editorial_source)
     expected = sorted(
         set(active.manifest["expectedContests"]) | set(metadata_contests),
@@ -589,11 +600,7 @@ def update_editorials(
     return _run_generation(
         source=editorial_source,
         cache_root=root,
-        generation_id=(
-            generation_id
-            or _resumable_generation_id(root, "update", expected)
-            or _generation_id("update")
-        ),
+        generation_id=generation_id or _generation_id("update"),
         expected_contests=expected,
         delay=delay,
         sleep_fn=sleep_fn,
