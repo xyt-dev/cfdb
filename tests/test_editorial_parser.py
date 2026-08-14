@@ -134,3 +134,48 @@ class EditorialParserSemanticTests(unittest.TestCase):
 
         self.assertNotIn("href", link.attrs)
         self.assertEqual(_plain_text(link), "kept text")
+
+    def test_image_preserves_only_normalized_source_and_decoded_alt(self):
+        source = (
+            '<div class="ttypography">'
+            '<img src="/images/diagram.png" alt="A &amp; B" width="800" onerror="attack()">'
+            '</div>'
+        )
+
+        result = parse_blog_html(
+            source,
+            contest_id="1700",
+            source_url="https://codeforces.com/blog/entry/103978",
+        )
+        image = next(node for node in _walk(result.root) if node.kind == "image")
+
+        self.assertEqual(
+            image.attrs,
+            {"src": "https://codeforces.com/images/diagram.png", "alt": "A & B"},
+        )
+
+    def test_missing_malformed_and_unsafe_image_sources_become_missing_assets(self):
+        source = (
+            '<div class="ttypography">'
+            '<img alt="missing">'
+            '<img src="http://[::1" alt="malformed">'
+            '<img src="javascript:attack()" alt="unsafe">'
+            '<img src="http:/no-host.png" alt="hostless">'
+            '</div>'
+        )
+
+        result = parse_blog_html(
+            source,
+            contest_id="1",
+            source_url="https://codeforces.com/blog/entry/1",
+        )
+        missing = [node for node in _walk(result.root) if node.kind == "missing_asset"]
+
+        self.assertEqual(
+            [node.attrs for node in missing],
+            [{"alt": "missing"}, {"alt": "malformed"}, {"alt": "unsafe"}, {"alt": "hostless"}],
+        )
+        self.assertEqual(
+            [item.code for item in result.diagnostics].count("unsupported-image-source"),
+            4,
+        )
