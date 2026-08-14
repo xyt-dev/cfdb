@@ -1,3 +1,5 @@
+import hashlib
+import json
 import unittest
 from pathlib import Path
 
@@ -22,7 +24,37 @@ def _plain_text(node) -> str:
     return (node.text or "") + "".join(_plain_text(child) for child in node.children)
 
 
+APPROVED_FIXTURE_RATIONALES = {
+    "contest-1700-detached-title-regression",
+    "contest-1369-spoiler-duplicate-regression",
+    "contest-1706-heading-level-regression",
+    "malformed-recovery",
+    "nested-structure",
+    "code-math-whitespace",
+    "sanitizer-security",
+}
+
+
 class EditorialParserTests(unittest.TestCase):
+    def test_fixture_checksums(self):
+        manifest = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
+        entries = manifest["fixtures"]
+        recorded_paths = {entry["path"] for entry in entries}
+        fixture_paths = {
+            path.relative_to(FIXTURES).as_posix()
+            for path in FIXTURES.rglob("*")
+            if path.is_file() and path.name != "manifest.json"
+        }
+
+        self.assertEqual(recorded_paths, fixture_paths)
+        self.assertEqual(len(recorded_paths), len(entries))
+        for entry in entries:
+            fixture = FIXTURES / entry["path"]
+            self.assertEqual(entry["encoding"], "utf-8")
+            self.assertEqual(entry["newline"], "lf")
+            self.assertIn(entry["rationale"], APPROVED_FIXTURE_RATIONALES)
+            self.assertEqual(hashlib.sha256(fixture.read_bytes()).hexdigest(), entry["sha256"])
+
     def test_preserves_heading_levels_nested_lists_quotes_and_code(self):
         source = """
         <div class="ttypography">

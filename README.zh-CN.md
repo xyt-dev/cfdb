@@ -4,73 +4,102 @@
 
 ![](vendor/screenshot.png)
 
-全本地化的 Codeforces 题目数据库 + 内置网页。离线浏览 **11k+ 道题**、题面与题解——零 CDN、无需账号、局域网可用。
+全本地化的 Codeforces 题目数据库与内置网页。离线浏览 **11k+ 道题**、题面与题解——零 CDN、无需账号、局域网可用。
 
 ## 功能
 
-- **全量题目元数据** — Codeforces API 抓取 11k+ 题（rating 800–3500、标签、解题数）→ `problems.json`
-- **题面/题解全本地化** — 爬取为 Markdown 存入 `statements/` 与 `editorials/`；图片本地化；公式由本地 MathJax 渲染（SVG，离线）
-- **动态 per-problem tutorial 补全** — 新版 editorial（2024+）的 JS 动态题解通过 `problemTutorial` API 自动补全
-- **PDF 题面支持** — 无 HTML 题面的比赛（老 ACM 赛）经 `pdftotext` 提取
-- **爬取智能** — 增量爬取 + 失败记忆（`failed_statements.json` / `failed_editorials.json`）、假题解防线（403 页/占位残留绝不写入）、403 封禁感知、分批并发爬取（8 并发）
-- **本地网页**（`index.html` 单文件）：
-  - 按 rating / 解题数 / 标签 / 名称筛选；6 种排序（含 ID 降序）
-  - 详情页「题面 / 题解」tab；题号标题链接到原题；「打开 ↗」链接
-  - **可折叠小节**（Hint / Solution / Tutorial / …）— 无框、主题联动
-  - **一键复制按钮**（样例框/代码块，Nerd Font 图标，任何浏览器可用）
-  - **公式渲染**：原始 LaTeX 四层保护链 + MathJax
-  - **i18n**：默认英文，「文/En」按钮切中文——布局像素级稳定
-  - **双主题**：Catppuccin Mocha / Gruvbox Dark（CSS 变量驱动，默认 gruvbox）
-  - 自己的解题代码展示在题面底部（`solutions/{题号}.{ext}`）
-- **零 CDN** — marked、highlight.js、MathJax、CodeNewRoman Nerd Font 全部本地
-- **局域网就绪** — 默认绑定 `0.0.0.0`，无鉴权
+- **全量题目元数据** — Codeforces API 提供的 11k+ 道题（rating 800–3500、标签、解题数）存入 `problems.json`。
+- **题面路径不变** — 题面继续以 Markdown 存入 `statements/`，图片本地化并由本地 MathJax 渲染公式。
+- **结构化题解 v2** — 题解解析为带类型的语义树，以规范 JSON 保存，再渲染为经过净化的 HTML。源码顺序、标题层级、嵌套 spoiler/列表/引用/表格、代码空白、图片和 TeX 与 Codeforces 保持语义一致。
+- **按完整题号精确组合动态 tutorial** — 每个完整 `problemTutorial` 片段（含官方标题）只替换完整 Codeforces 题号完全相同的 slot。1700 按 A 标题/正文到 F 标题/正文组合，不使用首字母、顺序或文本推断兜底。
+- **原子重建** — 文档和 manifest 先写入非活动代际；只有每场比赛均为 `ready` 或 `known_absent` 时，全量重建才通过一次原子指针替换激活。旧代际和 v1 Markdown 保留用于回滚。
+- **只读题解 API** — `GET /api/editorial` 不抓取 Codeforces，也不修改缓存或失败记忆。v2 激活前返回旧 Markdown；激活后以 v2 manifest 为唯一依据，ready 文档返回净化 HTML。
+- **本地网页**（`index.html` 单文件）— 筛选、排序、题面/题解 tab、本地解题代码、中英切换、双主题、离线 MathJax/高亮与复制按钮。
+- **纵深防御** — 源 HTML 经过允许列表解析和渲染；结构化阅读器使用 `sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"`，禁止 `allow-same-origin`。
+- **零 CDN、局域网就绪** — 浏览器资源全部 vendored，本地服务默认绑定 `0.0.0.0`，无鉴权。
 
 ## 快速开始
 
 ```bash
-# 仅代码（无数据）——数据在 snapshot 分支
+# 仅代码（无数据）——数据位于 snapshot 分支
 git clone https://github.com/xyt-dev/cfdb.git
 cd cfdb
-python3 server.py          # 启动（启动时自动增量爬取）
+python3 server.py          # 启动服务与后台增量更新
 
-# 带完整数据快照（statements/editorials/images，tag snapshot2026.8）：
+# 带完整数据快照：
 git clone -b snapshot https://github.com/xyt-dev/cfdb.git
 ```
 
-打开 <http://localhost:8765>（启动时打印局域网地址）。
+打开 <http://localhost:8765>（启动时会打印局域网地址）。
 
-**依赖**：Python 3.10+、`curl`、`poppler-utils`（`pdftotext`，仅 PDF 题面需要）。前端资源全部在 `vendor/`——无需 npm / pip install。
+**运行依赖：** Python 3.10+、`curl`、`poppler-utils`（`pdftotext`，仅 PDF 题面需要）。运行时无需 pip、npm 或 Node.js；浏览器资源全部在 `vendor/`。
 
 端口覆盖：`CFDB_PORT=9000 python3 server.py`
 
-## 手动爬取 / 更新
+## 更新与题解运维
 
 ```bash
-python3 update.py               # 刷新元数据 problems.json
-python3 update.py --statements  # 全量预爬题面
-python3 update.py --editorials  # 全量预爬题解
+python3 update.py                              # 刷新 problems.json 元数据
+python3 update.py --statements                 # 全量预爬 Markdown 题面
+python3 update.py --validate-editorial 1700    # 在线构建/渲染验证，不激活
+python3 update.py --editorials                 # v2 前爬旧版；v2 后建增量后继代际
+python3 update.py --editorials --rebuild       # 可续跑的 v2 全量重建
 ```
 
-## 数据布局
+`--validate-editorial` 使用临时本地图片目录，不改变活动代际。全量重建忽略 v1 缓存命中和失败记忆，按有界批次写入非活动代际，可续跑兼容的未完成全量代际；只要有比赛尚未达到终态，就不激活并以非零状态退出。v2 激活后，单独运行 `--editorials` 会从当前活动代际生成新后继，重新检查已知无题解和新增比赛，并且仅在完整时激活。
+
+### 状态含义
+
+- `ready` — 语义文档已验证，不含未解析 tutorial slot 或远程图片依赖。
+- `known_absent` — 两次成功且可识别的比赛页面检查都未发现 editorial/tutorial 链接；每次新重建都会复查。
+- `transient_failure` — 可重试的网络、限流、CSRF、响应或图片失败；阻止激活。
+- `invalid_structure` — 解析、完整题号组合或语义验证失败；阻止激活。
+
+### 缓存布局与回滚
 
 ```text
-cfdb/
-├── problems.json          # 元数据（git 忽略，可再生成）
-├── statements/            # 题面 md + images/（git 忽略）
-├── editorials/            # 题解 md + images/（git 忽略）
-├── solutions/             # 自己的解题代码，{题号}.{ext}
-├── server.py              # HTTP 服务 + 启动自动增量爬取
-├── cfcrawl.py             # 爬取库（curl 反反爬 + md 生成）
-├── html2md.py             # HTML → Markdown 转换器
-├── update.py              # 数据更新 / 全量预爬
-├── index.html             # 单页前端
-├── vendor/                # 本地依赖：marked、highlight.js、MathJax、Nerd Font
-├── CHANGELOG.md
-└── failed_statements.json / failed_editorials.json   # 爬取失败记忆
+editorials/
+├── *.md                              # 保留的旧版 v1 Markdown
+├── images/                           # 共享的本地题解图片
+└── v2/
+    ├── current.json                  # 原子活动代际指针
+    └── generations/<generation-id>/
+        ├── manifest.json             # 比赛集合、状态、回执与摘要
+        └── documents/<contestId>.json # 规范 schema-2 语义树
+```
+
+渲染 HTML 从规范 JSON 派生并由 `/api/editorial` 返回，不把源 HTML 写入缓存。当 `current.json` 记录了上一代际时，可原子重新激活它以回滚：
+
+```bash
+python3 - <<'PY'
+import json
+from editorial_cache import activate_generation
+with open("editorials/v2/current.json", encoding="utf-8") as source:
+    previous = json.load(source)["previousGenerationId"]
+activate_generation("editorials/v2", previous)
+PY
+```
+
+替代代际完成验证且回滚窗口关闭前，不要删除旧代际。
+
+## API 与阅读器行为
+
+活动 v2 内容的 `GET /api/editorial?contestId=1700` 返回 `format: "html"`、`schema: 2`、净化后的 `html`、Codeforces `url`、`known: true` 与 `status: "ready"`。确认无题解时返回空正文和 `status: "known_absent"`。没有任何 v2 指针前继续提供原有 `format: "markdown"` 响应；激活后不会逐比赛回退到 v1。
+
+题面和旧版题解继续使用 Markdown 阅读路径。v2 HTML 绕过 Markdown 解析与标题归一化，再复用本地 MathJax、语法高亮、复制按钮、图片诊断、外链处理和 iframe 高度同步。
+
+## 开发验证
+
+Node.js 仅为可选的无依赖阅读器开发测试工具，不是运行依赖：
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+node --test tests/reader_payload.test.js
+python3 -m py_compile editorial_model.py editorial_parser.py editorial_render.py editorial_cache.py editorial_rebuild.py cfcrawl.py server.py update.py
 ```
 
 ## 说明
 
-- 若 CF 临时封禁你的 IP（所有请求 403）：本地数据完全可用，服务器跳过爬取，下次启动自动重试
-- Git 只跟踪代码；数据（`statements/`、`editorials/`、`problems.json`、失败记忆）在 .gitignore
-- 完整历史见 [CHANGELOG.md](CHANGELOG.md)
+- Codeforces 临时封禁 IP 时，当前活动本地数据仍可用；网络更新失败不会替换活动代际。
+- 生成数据（`problems.json`、题面、题解、图片和失败记忆）属于快照/数据工作流，不应混入普通代码提交。
+- 完整历史见 [CHANGELOG.md](CHANGELOG.md)。
