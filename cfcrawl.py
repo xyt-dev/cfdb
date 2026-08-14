@@ -717,7 +717,9 @@ def _fsync_asset_directory(directory: str) -> None:
     try:
         descriptor = os.open(directory, flags)
     except OSError as error:
-        if error.errno in {errno.EACCES, errno.EINVAL, errno.ENOTSUP}:
+        if error.errno in {errno.EINVAL, errno.ENOTSUP} or (
+            os.name == "nt" and error.errno == errno.EACCES
+        ):
             return
         raise
     try:
