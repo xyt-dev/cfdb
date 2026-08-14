@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from html.parser import HTMLParser
 import re
@@ -374,6 +375,173 @@ class _SemanticHTMLParser(HTMLParser):
         if self._recoveries > self.limits.max_recoveries:
             raise ParseError("max-recoveries-exceeded")
         self.diagnostics.append(Diagnostic("warning", code, message))
+
+
+class _TutorialHeadingExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.parts: list[str] = []
+        self.depth = 0
+        self.complete = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.complete:
+            return
+        if self.depth == 0:
+            if tag.lower() != "h3":
+                return
+            self.parts.append(self.get_starttag_text() or "")
+            self.depth = 1
+            return
+        self.parts.append(self.get_starttag_text() or "")
+        self.depth += 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if self.depth:
+            self.parts.append(self.get_starttag_text() or "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self.depth:
+            return
+        self.parts.append(f"</{tag}>")
+        self.depth -= 1
+        if self.depth == 0:
+            self.complete = True
+
+    def handle_data(self, data: str) -> None:
+        if self.depth:
+            self.parts.append(data)
+
+    def handle_entityref(self, name: str) -> None:
+        if self.depth:
+            self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self.depth:
+            self.parts.append(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        if self.depth:
+            self.parts.append(f"<!--{data}-->")
+
+
+def _parse_tutorial_parts(
+    html_text: str,
+    *,
+    limits: ParseLimits,
+) -> tuple[Node, Node, list[Diagnostic]]:
+    if len(html_text.encode("utf-8")) > limits.max_input_bytes:
+        raise ParseError("max-input-bytes-exceeded")
+
+    extractor = _TutorialHeadingExtractor()
+    extractor.feed(html_text)
+    extractor.close()
+    if not extractor.complete:
+        raise ParseError("missing-tutorial-heading")
+
+    heading_parser = _SemanticHTMLParser(
+        mode="tutorial-heading",
+        contest_id="",
+        source_url="https://codeforces.com",
+        limits=limits,
+    )
+    heading_parser.feed(
+        '<div class="ttypography">' + "".join(extractor.parts) + "</div>"
+    )
+    heading_parser.close()
+    heading_root, heading_diagnostics = heading_parser.finish()
+    if len(heading_root.children) != 1 or heading_root.children[0].kind != "heading":
+        raise ParseError("invalid-tutorial-heading")
+
+    body_parser = _SemanticHTMLParser(
+        mode="tutorial-body",
+        contest_id="",
+        source_url="https://codeforces.com",
+        limits=limits,
+    )
+    body_parser.feed(html_text)
+    body_parser.close()
+    body, body_diagnostics = body_parser.finish()
+    if not body.children:
+        raise ParseError("missing-tutorial-body")
+    return heading_root.children[0], body, [*heading_diagnostics, *body_diagnostics]
+
+
+def _problem_code_from_heading_link(heading: Node) -> str:
+    links = [child for child in heading.children if child.kind == "link"]
+    if len(links) != 1:
+        raise ParseError("missing-problem-heading-link")
+    href = str(links[0].attrs.get("href", ""))
+    path = urlsplit(href).path
+    match = re.fullmatch(r"/contest/(\d+)/problem/([A-Za-z][A-Za-z0-9]*)", path)
+    if match is None:
+        raise ParseError("invalid-problem-heading-link")
+    return match.group(1) + match.group(2)
+
+
+def parse_tutorial_fragment(
+    html_text: str,
+    *,
+    expected_code: str,
+    limits: ParseLimits = ParseLimits(),
+) -> Node:
+    heading, body, diagnostics = _parse_tutorial_parts(html_text, limits=limits)
+    actual_code = _problem_code_from_heading_link(heading)
+    if actual_code != expected_code:
+        raise ParseError(f"problem-code-mismatch:{actual_code}:{expected_code}")
+    return Node(
+        kind="problem_section",
+        attrs={"problemCode": expected_code},
+        children=[heading, *body.children],
+    )
+
+
+def compose_tutorials(
+    document: EditorialDocument,
+    *,
+    tutorials: dict[str, Node],
+    missing_codes: set[str] | None = None,
+) -> EditorialDocument:
+    remaining: dict[str, Node] = {}
+    for supplied_code, fragment in tutorials.items():
+        fragment_code = str(fragment.attrs.get("problemCode", ""))
+        if fragment_code in remaining:
+            raise ParseError(f"duplicate-tutorial-fragment:{fragment_code}")
+        if fragment_code != supplied_code:
+            raise ParseError(f"tutorial-key-mismatch:{fragment_code}:{supplied_code}")
+        remaining[fragment_code] = fragment
+
+    missing = set(missing_codes or ())
+    seen_slots: set[str] = set()
+    diagnostics = list(document.diagnostics)
+
+    def replace(node: Node) -> list[Node]:
+        if node.kind == "tutorial_slot":
+            code = str(node.attrs.get("problemCode", ""))
+            if code in seen_slots:
+                raise ParseError(f"duplicate-tutorial-slot:{code}")
+            seen_slots.add(code)
+            if code in remaining:
+                return [copy.deepcopy(remaining.pop(code))]
+            if code in missing:
+                diagnostics.append(Diagnostic("warning", "tutorial-known-absent", code))
+                return []
+            return [copy.deepcopy(node)]
+        clone = copy.deepcopy(node)
+        clone.children = [replacement for child in node.children for replacement in replace(child)]
+        return [clone]
+
+    root = replace(document.root)[0]
+    unexpected = set(remaining) | (missing - seen_slots)
+    if unexpected:
+        raise ParseError("unexpected-tutorial-code:" + ",".join(sorted(unexpected)))
+    return EditorialDocument(
+        contest_id=document.contest_id,
+        source_url=document.source_url,
+        root=root,
+        diagnostics=diagnostics,
+        assets=list(document.assets),
+    )
 
 
 def parse_blog_html(

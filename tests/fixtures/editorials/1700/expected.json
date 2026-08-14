@@ -1,0 +1,5 @@
+{
+  "problemCodes": ["1700A", "1700B", "1700C", "1700D", "1700E", "1700F"],
+  "bodySentinels": ["A_BODY_SENTINEL", "B_BODY_SENTINEL", "C_BODY_SENTINEL", "D_BODY_SENTINEL", "E_BODY_SENTINEL", "F_BODY_SENTINEL"],
+  "creditText": "1700A - Optimal Path and 1700B - Palindromic Numbers were prepared by the authors."
+}

@@ -1,0 +1,52 @@
+{
+  "fixtures": [
+    {
+      "path": "1700/base.html",
+      "sha256": "61385da070edb59f7548dd71e51f5865a16beb756d787bda6705127932011d6b",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/expected.json",
+      "sha256": "822ee1ff05818d9c8946294f55361c41788c12d38e3074fbdefff3adf1ad40e8",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/tutorial-A.html",
+      "sha256": "66f7aba96031eb538b28bf265660f85e94d170a23cb301db1be673de02849af9",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/tutorial-B.html",
+      "sha256": "f53606c8851768329c1e3f549defc9959eed60a69a6d67f20200719143fa3e72",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/tutorial-C.html",
+      "sha256": "44b691808df040965dbdfc41cae6ddebb70652a6bea06d4a9522ad2c8c5a6d8b",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/tutorial-D.html",
+      "sha256": "b8df2ce5fb2fa8ca988b0581e9e4d84c1b58022274b47c9ae2c8863a1ca21b75",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/tutorial-E.html",
+      "sha256": "1a81d40bd4552337f6a78ec521b4deea032d010ada2d3a75d908141845a7c815",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    },
+    {
+      "path": "1700/tutorial-F.html",
+      "sha256": "3593ac8b4f42a154ae191e59c050f8981f89abf1204327989e5893315a24f64f",
+      "normalization": "UTF-8/LF",
+      "rationale": "contest-1700-detached-title-regression"
+    }
+  ]
+}
