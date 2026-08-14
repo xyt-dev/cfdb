@@ -8,6 +8,9 @@
 
 - **favicon 与标题 CF 图标**：标签页 favicon 使用本地 CF 图标（`vendor/cf-favicon.png`，零 CDN）；页面顶部标题（h1）前加 CF 图标 22×22
 - **`/vendor/` 图片 content-type**：png/jpg/gif/svg/webp 正确返回（此前 octet-stream 导致 favicon 不显示）
+- **结构化题解 v2**：修复 contest 1700 的题号标题与正文脱离问题；动态 tutorial 仅按完整 problem code 精确组合，保持嵌套 spoiler、列表与官方标题层级；语义树以规范 JSON 保存并渲染为净化 HTML，前端使用最小权限 sandbox。
+- **原子全量重爬与回滚**：完整代际只有在全部比赛达到 `ready` 或 `known_absent` 后才原子激活；保留旧代际与 v1 Markdown，可重新激活上一代际回滚。
+- **只读题解 GET**：`GET /api/editorial` 不再于请求期间抓取或修改缓存；v2 激活后返回净化 HTML，激活前继续兼容旧版 Markdown。
 
 ### 修复
 
@@ -43,13 +46,9 @@
 - **iframe 高度动态同步**：浏览器 resize（宽屏→窄屏）时图片等比缩放、内容重排——srcdoc 补 `window resize` 监听自动防抖同步高度（此前高度停留在旧值，题面图片下文字与本地解题代码错位/被覆盖）
 - **默认主题改为 gruvbox**：`data-theme` 默认值 catppuccin → gruvbox（无 localStorage 记忆时生效；已记忆的主题保持用户选择；srcdoc 内联色值随之）
 
-
-
 ### 修复
 
 - **iframe 高度同步根本解决**：折叠块展开后代码框超出底部不可见（事件驱动 syncH 有遗漏）→ srcdoc 改用 **MutationObserver 监听内容变化**（折叠/公式 SVG/代码高亮/图片 load/字体就绪一律自动防抖同步高度）——不再依赖逐个事件
-
-
 
 ### 新增
 
@@ -60,8 +59,6 @@
 - **题面标题层级**：题目名称唯一 h1（24px 居中）；Input/Output/Note/Examples 小节与样例标记从 `##`/`#` 降级为 `####`（不再是大标题）；属性行（time limit per test: / input: / output: 带冒号）居中（CF 风格）
 - **parseHash 支持数字 index**：`#/problem/2164F2` 等链接可直接打开（正则 `[A-Za-z]+` → `[A-Za-z0-9]+`）
 
-
-
 ### 修复
 
 - **假题解防线（根本解决）**：题解 403 错误页/nginx 页检测丢弃（@temp 可重试）；动态 tutorial 占位符替换加无标题博客 fallback（1300 等格式）；写前校验（占位残留/错误页/过短 <100 字符 → 不写）；清理 12 个 403 污染 + 102 个占位残留假题解并重爬恢复 407 场
@@ -71,8 +68,6 @@
 
 - **批量爬取框架复用**：题面/题解共用 `_run_batch_crawler`（8 并发 batch + 403 自适应暂停 + 批间限速 + 进度回调）——消除重复实现，行为一致；`_save_failed` 加并发写锁
 
-
-
 ### 性能
 
 - **editorial 探测并发化**：未确认的比赛按批并发探测（BATCH 8 + 批间限速 1.5s），已爬/已确认无题解的比赛秒跳过；整批网络异常自动暂停（403 自适应），下次启动续跑——首轮 2000 场从串行 ~50 分钟提速数倍，且记忆持续积累、中断不丢
@@ -80,7 +75,6 @@
 ### 修复
 
 - **failed_editorials 并发写安全**：记忆写入加线程锁（HTTP 线程与后台探测并发写不再互相覆盖丢条目）
-
 
 ### 修复
 
@@ -204,13 +198,3 @@ index.html   单页前端（筛选/排序/分页/详情/双主题/代码高亮�
 update.py    数据更新/全量预爬（--statements）
 vendor/      本地依赖：marked、highlight.js、MathJax tex-svg（零 CDN）
 ```
-
-
-
-
-
-
-
-
-
-
