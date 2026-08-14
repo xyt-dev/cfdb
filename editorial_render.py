@@ -31,6 +31,7 @@ _KNOWN_CODE_LANGUAGES = frozenset(
     }
 )
 _MISSING_ASSET_HTML = '<span class="img-missing">Image unavailable</span>'
+_ALLOWED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 
 
 def _has_unsafe_url_characters(value: str) -> bool:
@@ -96,7 +97,7 @@ def sanitize_image_url(url: object) -> str | None:
         return None
     if any(part in {".", ".."} for part in decoded_path.split("/")):
         return None
-    if decoded_path.lower().endswith(".svg"):
+    if not decoded_path.lower().endswith(_ALLOWED_IMAGE_EXTENSIONS):
         return None
     return url
 
@@ -128,6 +129,14 @@ def _render_spoiler_title(node: Node) -> str:
             title_nodes.append(Node.from_dict(value))
     except (KeyError, TypeError, ValueError):
         raise RenderError("invalid-spoiler-title") from None
+    title_document = EditorialDocument(
+        contest_id="",
+        source_url="",
+        root=Node(kind="document", children=title_nodes),
+    )
+    errors = validate_document(title_document, ready=True)
+    if errors:
+        raise RenderError(errors[0].code)
     return "".join(_render_node(title_node) for title_node in title_nodes)
 
 
