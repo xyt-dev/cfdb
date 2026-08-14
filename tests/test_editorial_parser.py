@@ -1,6 +1,25 @@
 import unittest
+from pathlib import Path
 
-from editorial_parser import parse_blog_html
+from editorial_model import Node
+from editorial_parser import ParseError, ParseLimits, parse_blog_html
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "editorials"
+
+
+def _fixture(relative: str) -> str:
+    return (FIXTURES / relative).read_text(encoding="utf-8")
+
+
+def _walk(node):
+    yield node
+    for child in node.children:
+        yield from _walk(child)
+
+
+def _plain_text(node) -> str:
+    return (node.text or "") + "".join(_plain_text(child) for child in node.children)
 
 
 class EditorialParserTests(unittest.TestCase):
@@ -62,3 +81,47 @@ class EditorialParserTests(unittest.TestCase):
         self.assertEqual([node.kind for node in root.children], ["paragraph", "paragraph", "paragraph"])
         self.assertEqual([node.kind for node in root.children[2].children], ["strong", "text", "emphasis"])
         self.assertEqual(root.children[2].children[1].text, " ")
+
+
+class EditorialParserSemanticTests(unittest.TestCase):
+    def test_spoiler_keeps_title_and_body_together(self):
+        result = parse_blog_html(_fixture("1369/base.html"), contest_id="1369", source_url="u")
+        spoiler = next(node for node in _walk(result.root) if node.kind == "spoiler")
+        self.assertEqual(spoiler.attrs["title"][0]["text"], "Brief Solution")
+        self.assertIn("A_BRIEF_SENTINEL", _plain_text(spoiler))
+
+    def test_nested_spoilers_remain_nested(self):
+        result = parse_blog_html(_fixture("synthetic/nested-structure.html"), contest_id="1700", source_url="u")
+        spoilers = [node for node in _walk(result.root) if node.kind == "spoiler"]
+        self.assertEqual([node.attrs["title"][0]["text"] for node in spoilers], ["Outer", "Inner"])
+        self.assertIn("INNER_BODY", _plain_text(spoilers[0]))
+
+    def test_problem_tutorial_becomes_identity_slot(self):
+        result = parse_blog_html(_fixture("synthetic/nested-structure.html"), contest_id="1700", source_url="u")
+        slots = [node for node in _walk(result.root) if node.kind == "tutorial_slot"]
+        self.assertEqual([node.attrs["problemCode"] for node in slots], ["1700A"])
+
+    def test_malformed_second_typography_island_is_excluded(self):
+        result = parse_blog_html(_fixture("synthetic/malformed.html"), contest_id="1", source_url="u")
+        self.assertIn("before", _plain_text(result.root))
+        self.assertNotIn("comment must not enter editorial", _plain_text(result.root))
+        self.assertIn("recovered-close", [item.code for item in result.diagnostics])
+
+    def test_official_mixed_heading_levels_are_unchanged(self):
+        result = parse_blog_html(_fixture("1706/base.html"), contest_id="1706", source_url="u")
+        levels = [node.attrs["level"] for node in result.root.children if node.kind == "heading"]
+        self.assertEqual(levels, [2, 4, 2, 4])
+
+    def test_dangerous_subtrees_are_dropped_with_diagnostics(self):
+        result = parse_blog_html(_fixture("synthetic/unsafe.html"), contest_id="1", source_url="u")
+        text = _plain_text(result.root)
+        self.assertNotIn("SCRIPT_TEXT_MUST_NOT_SURVIVE", text)
+        self.assertNotIn("FORM_TEXT_MUST_NOT_SURVIVE", text)
+        self.assertIn("unsafe link text", text)
+        self.assertIn("safe text", text)
+        self.assertIn("dropped-dangerous-subtree", [item.code for item in result.diagnostics])
+
+    def test_depth_limit_raises_parse_error(self):
+        source = '<div class="ttypography">' + "<div>" * 5 + "x" + "</div>" * 5 + "</div>"
+        with self.assertRaisesRegex(ParseError, "max-depth-exceeded"):
+            parse_blog_html(source, contest_id="1", source_url="u", limits=ParseLimits(max_depth=3))
