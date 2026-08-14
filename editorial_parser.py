@@ -73,7 +73,6 @@ class _SemanticHTMLParser(HTMLParser):
         "sub": "subscript",
         "sup": "superscript",
     }
-    _TEXTUAL_BLOCKS = {"heading", "paragraph", "list_item", "table_cell"}
     _HTML_WHITESPACE = re.compile(r"[\t\n\f\r ]+")
 
     def __init__(
@@ -168,7 +167,7 @@ class _SemanticHTMLParser(HTMLParser):
         normalized = self._HTML_WHITESPACE.sub(" ", data)
         if not normalized:
             return
-        if normalized == " " and not self._whitespace_is_meaningful(destination, data):
+        if normalized == " " and not self._whitespace_is_meaningful(destination):
             return
         self._append_text(destination, normalized)
 
@@ -245,17 +244,27 @@ class _SemanticHTMLParser(HTMLParser):
             raise ParseError("maximum-nodes-exceeded")
         destination.children.append(Node(kind="text", text=text))
 
-    def _whitespace_is_meaningful(self, destination: Node, original: str) -> bool:
-        if destination.kind in self._TEXTUAL_BLOCKS or destination.kind in self._INLINE_KINDS.values():
-            return bool(destination.children)
-        return "\n" not in original and bool(destination.children)
+    def _whitespace_is_meaningful(self, destination: Node) -> bool:
+        if not destination.children:
+            return False
+        previous_kind = destination.children[-1].kind
+        return previous_kind == "text" or previous_kind in self._INLINE_KINDS.values()
 
     def _close_optional_for_start(self, incoming: str) -> None:
         while self._stack:
-            top = self._stack[-1]
-            if incoming not in self._OPTIONAL_START_CLOSES.get(top.tag, set()):
-                break
-            self._pop_frame()
+            for index in range(len(self._stack) - 1, -1, -1):
+                frame = self._stack[index]
+                if incoming in self._OPTIONAL_START_CLOSES.get(frame.tag, set()):
+                    while len(self._stack) > index:
+                        self._pop_frame()
+                    break
+                if frame.island or (
+                    frame.semantic is not None
+                    and frame.semantic.kind not in self._INLINE_KINDS.values()
+                ):
+                    return
+            else:
+                return
 
     def _pop_frame(self) -> None:
         frame = self._stack.pop()

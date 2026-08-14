@@ -35,3 +35,30 @@ class EditorialParserTests(unittest.TestCase):
         self.assertEqual(result.root.children[0].kind, "paragraph")
         self.assertEqual(result.root.children[0].children[0].kind, "link")
         self.assertFalse(any(node.kind == "heading" for node in result.root.children))
+
+    def test_optional_list_item_close_skips_intervening_inline_frames(self):
+        source = """
+        <div class="ttypography">
+          <ul><li><strong>first<li>second</ul>
+        </div>
+        """
+
+        result = parse_blog_html(source, contest_id="1", source_url="https://codeforces.com/blog/entry/1")
+        items = result.root.children[0].children
+
+        self.assertEqual([node.kind for node in items], ["list_item", "list_item"])
+        self.assertEqual(items[0].children[0].kind, "strong")
+        self.assertEqual(items[1].children[0].text, "second")
+
+    def test_discards_inter_block_whitespace_but_preserves_inline_space(self):
+        source = """
+        <div class="ttypography"><p>one</p> <p>two</p>
+          <p><strong>left</strong> <em>right</em></p></div>
+        """
+
+        result = parse_blog_html(source, contest_id="1", source_url="https://codeforces.com/blog/entry/1")
+        root = result.root
+
+        self.assertEqual([node.kind for node in root.children], ["paragraph", "paragraph", "paragraph"])
+        self.assertEqual([node.kind for node in root.children[2].children], ["strong", "text", "emphasis"])
+        self.assertEqual(root.children[2].children[1].text, " ")
