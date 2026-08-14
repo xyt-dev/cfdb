@@ -291,6 +291,25 @@ class EditorialCrawlerTests(unittest.TestCase):
             ):
                 _fsync_asset_directory(directory)
 
+    def test_directory_open_eacces_propagates_on_posix(self):
+        # POSIX directory handles are supported, so EACCES is a real durability failure.
+        with patch("cfcrawl.os.name", "posix"), patch(
+            "cfcrawl.os.open",
+            side_effect=OSError(errno.EACCES, "permission denied"),
+        ):
+            with self.assertRaises(OSError) as raised:
+                _fsync_asset_directory("/asset-directory")
+
+        self.assertEqual(raised.exception.errno, errno.EACCES)
+
+    def test_directory_open_eacces_is_ignored_only_when_handles_are_unsupported(self):
+        # Windows lacks the POSIX directory-handle contract used by this helper.
+        with patch("cfcrawl.os.name", "nt"), patch(
+            "cfcrawl.os.open",
+            side_effect=OSError(errno.EACCES, "directory handles unsupported"),
+        ):
+            _fsync_asset_directory("C:/asset-directory")
+
     def test_directory_fsync_propagates_real_durability_errors(self):
         with tempfile.TemporaryDirectory() as directory:
             for error_number in (errno.EIO, errno.ENOSPC):
