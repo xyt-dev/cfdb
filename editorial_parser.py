@@ -287,6 +287,32 @@ class _SemanticHTMLParser(HTMLParser):
             node = Node(kind="horizontal_rule")
         elif tag == "br":
             node = Node(kind="line_break")
+        elif tag == "img":
+            alt = next(
+                (value or "" for name, value in attrs if name.lower() == "alt"),
+                "",
+            )
+            source = next(
+                (value or "" for name, value in attrs if name.lower() == "src"),
+                "",
+            )
+            try:
+                resolved_source = urljoin(self.source_url, source) if source else ""
+                parsed_source = urlsplit(resolved_source)
+                scheme = parsed_source.scheme.lower()
+                has_host = bool(parsed_source.netloc)
+            except ValueError:
+                resolved_source = ""
+                scheme = ""
+                has_host = False
+            if resolved_source and scheme in {"http", "https"} and has_host:
+                node = Node(kind="image", attrs={"src": resolved_source, "alt": alt})
+            else:
+                self._recover(
+                    "unsupported-image-source",
+                    "Replaced an image with a missing-asset node",
+                )
+                node = Node(kind="missing_asset", attrs={"alt": alt})
         elif tag in self._BLOCK_KINDS:
             node_attrs: dict[str, object] = {}
             if tag in {"ol", "ul"}:

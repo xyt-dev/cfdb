@@ -4,15 +4,22 @@
   {ROOT}/statements/{contestId}{index}.md   题面
   {ROOT}/solutions/{contestId}{index}.*     自己的解题代码（任意扩展名）
 """
+import copy
+from dataclasses import dataclass
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
+from urllib.parse import urlsplit
 import zlib
 
 import html2md
+from editorial_cache import ContestStatus
+from editorial_model import Diagnostic, EditorialDocument, Node, validate_document
+from editorial_parser import ParseError, compose_tutorials, parse_blog_html, parse_tutorial_fragment
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATEMENT_DIR = os.path.join(ROOT, "statements")
@@ -20,6 +27,20 @@ SOLUTION_DIR = os.path.join(ROOT, "solutions")
 EDITORIAL_DIR = os.path.join(ROOT, "editorials")
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 CURL = os.environ.get("CFGEN_CURL") or "curl"
+
+
+@dataclass(slots=True)
+class TutorialBatch:
+    html_by_code: dict[str, str]
+    missing_codes: set[str]
+    transient_errors: list[str]
+
+
+@dataclass(slots=True)
+class EditorialBuildResult:
+    status: ContestStatus
+    document: EditorialDocument | None
+    evidence: dict[str, object]
 
 
 def _pick_curl():
@@ -189,6 +210,7 @@ def _flatten_transparent_png(path: str) -> bool:
                         g, a = row[i], row[i + 1]
                     _mix(out, o, g, g, g, a); o += 3
         elif colortype == 2:  # RGB + tRNS 透明色键
+            assert trns is not None
             key = (trns[1], trns[3], trns[5]) if bytes_per_sample == 1 else (trns[0], trns[2], trns[4])
             step = 3 * bytes_per_sample
             for row in rows:
@@ -202,6 +224,7 @@ def _flatten_transparent_png(path: str) -> bool:
                     else:
                         _mix(out, o, r, g, b, 255); o += 3
         elif colortype == 0:  # gray + tRNS 透明色键
+            assert trns is not None
             key = trns[1] if bytes_per_sample == 1 else trns[0]
             if bitdepth in (1, 2, 4):
                 per_byte = 8 // bitdepth
@@ -224,26 +247,27 @@ def _flatten_transparent_png(path: str) -> bool:
                         a = 0 if g == key else 255
                         _mix(out, o, g, g, g, a); o += 3
         else:  # palette + tRNS（1/2/4/8-bit 拆位）
-            ncolors = len(plte) // 3 if plte else 0
+            assert plte is not None
+            ncolors = len(plte) // 3
             pal = [(plte[i * 3], plte[i * 3 + 1], plte[i * 3 + 2]) for i in range(ncolors)]
             alphas = [255] * ncolors
             if trns:
                 for i in range(min(len(trns), ncolors)):
                     alphas[i] = trns[i]
-            if bitdepth == 8:
-                def idx_iter(row):
-                    return iter(row)
-            else:
-                per_byte = 8 // bitdepth
-                mask = (1 << bitdepth) - 1
-                def idx_iter(row):
-                    n = 0
-                    for byte in row:
-                        for sh in range(per_byte - 1, -1, -1):
-                            if n >= w:
-                                return  # stride ceil 尾字节多余像素——不越界
-                            yield (byte >> (sh * bitdepth)) & mask
-                            n += 1
+            per_byte = 8 // bitdepth
+            mask = (1 << bitdepth) - 1
+
+            def idx_iter(row):
+                if bitdepth == 8:
+                    yield from row
+                    return
+                n = 0
+                for byte in row:
+                    for sh in range(per_byte - 1, -1, -1):
+                        if n >= w:
+                            return  # stride ceil 尾字节多余像素——不越界
+                        yield (byte >> (sh * bitdepth)) & mask
+                        n += 1
             for row in rows:
                 for idx in idx_iter(row):
                     if idx < ncolors:
@@ -537,7 +561,405 @@ def read_editorial_url(cid) -> str | None:
     return None
 
 
-def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
+def _tutorial_batch_from_responses(codes, fetch_tutorial) -> TutorialBatch:
+    html_by_code: dict[str, str] = {}
+    missing_codes: set[str] = set()
+    transient_errors: list[str] = []
+    for code in codes:
+        try:
+            response = fetch_tutorial(code)
+        except Exception:
+            transient_errors.append(f"{code}:tutorial-request-failed")
+            continue
+        if not isinstance(response, dict):
+            transient_errors.append(f"{code}:invalid-tutorial-response")
+            continue
+        success = response.get("success")
+        if success is True or success == "true":
+            fragment = response.get("html")
+            if isinstance(fragment, str) and fragment.strip():
+                html_by_code[code] = fragment
+            else:
+                transient_errors.append(f"{code}:missing-tutorial-html")
+        elif success is False or success == "false":
+            missing_codes.add(code)
+        else:
+            transient_errors.append(f"{code}:invalid-tutorial-success")
+    return TutorialBatch(html_by_code, missing_codes, transient_errors)
+
+
+def _fetch_problem_tutorial_fragments(cid: str, codes: list[str]) -> TutorialBatch:
+    if not codes:
+        return TutorialBatch({}, set(), [])
+
+    descriptor, jar = tempfile.mkstemp(prefix=f"cfdb-{cid}-", suffix=".cookies")
+    os.close(descriptor)
+    try:
+        idx0 = codes[0][len(cid):]
+        try:
+            page_result = subprocess.run(
+                [CURL, "-s", "-c", jar, "--max-time", "20",
+                 "-H", f"User-Agent: {UA}",
+                 f"https://codeforces.com/contest/{cid}/problem/{idx0}"],
+                capture_output=True,
+                timeout=30,
+            )
+            page = page_result.stdout.decode("utf-8", "replace")
+        except Exception:
+            return TutorialBatch({}, set(), ["csrf-page-fetch-failed"])
+        match = re.search(r"data-csrf='([a-f0-9]+)'", page)
+        if match is None:
+            return TutorialBatch({}, set(), ["csrf-token-unavailable"])
+        token = match.group(1)
+
+        def fetch_tutorial(code: str):
+            result = subprocess.run(
+                [CURL, "-s", "-b", jar, "-c", jar, "-X", "POST",
+                 "--max-time", "20", "-H", f"User-Agent: {UA}",
+                 "-H", "X-Requested-With: XMLHttpRequest",
+                 "-H", f"X-Csrf-Token: {token}",
+                 "--data", f"problemCode={code}",
+                 "https://codeforces.com/data/problemTutorial"],
+                capture_output=True,
+                timeout=30,
+            )
+            if result.returncode != 0 or not result.stdout:
+                raise OSError("tutorial request failed")
+            try:
+                return json.loads(result.stdout)
+            finally:
+                time.sleep(0.3)
+
+        return _tutorial_batch_from_responses(codes, fetch_tutorial)
+    finally:
+        try:
+            os.remove(jar)
+        except OSError:
+            pass
+
+
+def build_editorial_document(
+    contest_id,
+    source_url,
+    base_html,
+    tutorial_batch,
+    asset_localizer,
+) -> EditorialBuildResult:
+    contest_id = str(contest_id)
+    if tutorial_batch.transient_errors:
+        return EditorialBuildResult(
+            ContestStatus.TRANSIENT_FAILURE,
+            None,
+            {"errors": list(tutorial_batch.transient_errors)},
+        )
+    try:
+        base = parse_blog_html(
+            base_html,
+            contest_id=contest_id,
+            source_url=source_url,
+        )
+        parsed = {
+            code: parse_tutorial_fragment(fragment, expected_code=code)
+            for code, fragment in tutorial_batch.html_by_code.items()
+        }
+        composed = compose_tutorials(
+            base,
+            tutorials=parsed,
+            missing_codes=tutorial_batch.missing_codes,
+        )
+    except ParseError as error:
+        return EditorialBuildResult(
+            ContestStatus.INVALID_STRUCTURE,
+            None,
+            {"error": str(error)},
+        )
+    localized = asset_localizer(composed)
+    if localized.status is not ContestStatus.READY or localized.document is None:
+        return localized
+    validation_errors = validate_document(localized.document, ready=True)
+    if validation_errors:
+        return EditorialBuildResult(
+            ContestStatus.INVALID_STRUCTURE,
+            None,
+            {"errors": [item.to_dict() for item in validation_errors]},
+        )
+    return EditorialBuildResult(
+        ContestStatus.READY,
+        localized.document,
+        {"sourceUrl": source_url},
+    )
+
+
+def _fetch_editorial_asset(url: str) -> bytes | None:
+    try:
+        result = subprocess.run(
+            [CURL, "-sL", "--max-time", "20", "-H", f"User-Agent: {UA}", url],
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception:
+        return None
+    payload = result.stdout.lstrip()
+    if (
+        result.returncode != 0
+        or not payload
+        or payload.lower().startswith((b"<html", b"<!doctype html"))
+    ):
+        return None
+    return result.stdout
+
+
+def _fsync_asset_directory(directory: str) -> None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError:
+        return
+    try:
+        try:
+            os.fsync(descriptor)
+        except OSError:
+            pass
+    finally:
+        os.close(descriptor)
+
+
+def _atomic_write_editorial_asset(target: str, payload: bytes) -> None:
+    directory = os.path.dirname(target)
+    os.makedirs(directory, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{os.path.basename(target)}.",
+        suffix=".tmp",
+        dir=directory,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        if target.lower().endswith(".png"):
+            _flatten_transparent_png(temporary)
+            with open(temporary, "rb+") as output:
+                output.flush()
+                os.fsync(output.fileno())
+        os.replace(temporary, target)
+        _fsync_asset_directory(directory)
+    except BaseException:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def localize_editorial_assets(
+    document: EditorialDocument,
+    *,
+    image_dir: str | None = None,
+    image_fetcher=None,
+) -> EditorialBuildResult:
+    image_dir = image_dir or EDITORIAL_IMAGE_DIR
+    image_fetcher = image_fetcher or _fetch_editorial_asset
+    localized = copy.deepcopy(document)
+    localized_assets = list(localized.assets)
+    image_number = 0
+
+    class _TransientAssetError(Exception):
+        def __init__(self, diagnostic: Diagnostic) -> None:
+            super().__init__(diagnostic.message)
+            self.diagnostic = diagnostic
+
+    def missing_asset(node: Node, source: str, path: str) -> Node:
+        localized.diagnostics.append(
+            Diagnostic(
+                "warning",
+                "editorial-asset-unsupported",
+                source or "Image source is missing or unsupported",
+                path,
+            )
+        )
+        return Node(kind="missing_asset", attrs={"alt": str(node.attrs.get("alt", ""))})
+
+    def transform(node: Node, path: str) -> Node:
+        nonlocal image_number
+        if node.kind == "image":
+            image_number += 1
+            source = str(node.attrs.get("src", ""))
+            try:
+                parsed_source = urlsplit(source)
+            except ValueError:
+                return missing_asset(node, source, path)
+            extension = os.path.splitext(parsed_source.path)[1].lower()
+            if extension == ".svg":
+                return missing_asset(node, source, path)
+            if source.startswith("/eimages/") and extension in {
+                ".png", ".jpg", ".jpeg", ".gif", ".webp",
+            }:
+                if source not in localized_assets:
+                    localized_assets.append(source)
+                return node
+            if parsed_source.scheme not in {"http", "https"} or not parsed_source.netloc:
+                return missing_asset(node, source, path)
+            if extension not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                extension = ".png"
+            name = f"{localized.contest_id}_{image_number}{extension}"
+            target = os.path.join(image_dir, name)
+            route = f"/eimages/{name}"
+            if not os.path.isfile(target):
+                try:
+                    payload = image_fetcher(source)
+                except Exception:
+                    payload = None
+                if not isinstance(payload, bytes) or not payload:
+                    raise _TransientAssetError(
+                        Diagnostic(
+                            "error",
+                            "editorial-asset-transient-failure",
+                            source,
+                            path,
+                        )
+                    )
+                try:
+                    _atomic_write_editorial_asset(target, payload)
+                except OSError:
+                    raise _TransientAssetError(
+                        Diagnostic(
+                            "error",
+                            "editorial-asset-write-failed",
+                            source,
+                            path,
+                        )
+                    ) from None
+            node.attrs["src"] = route
+            if route not in localized_assets:
+                localized_assets.append(route)
+            return node
+        if node.kind == "spoiler":
+            title = node.attrs.get("title")
+            if isinstance(title, list):
+                localized_title = []
+                for index, value in enumerate(title):
+                    if isinstance(value, dict):
+                        title_node = Node.from_dict(value)
+                        localized_title.append(
+                            transform(title_node, f"{path}/title/{index}").to_dict()
+                        )
+                    else:
+                        localized_title.append(value)
+                node.attrs["title"] = localized_title
+        node.children = [
+            transform(child, f"{path}/{index}")
+            for index, child in enumerate(node.children)
+        ]
+        return node
+
+    try:
+        localized.root = transform(localized.root, "document")
+    except _TransientAssetError as error:
+        return EditorialBuildResult(
+            ContestStatus.TRANSIENT_FAILURE,
+            None,
+            {"errors": [error.diagnostic.to_dict()]},
+        )
+    localized.assets = localized_assets
+    return EditorialBuildResult(
+        ContestStatus.READY,
+        localized,
+        {"assets": list(localized_assets)},
+    )
+
+
+def fetch_editorial_v2(
+    cid,
+    retries: int = 3,
+    timeout: int = 30,
+    *,
+    fetch_page=None,
+    fetch_tutorial=None,
+    asset_localizer=None,
+) -> EditorialBuildResult:
+    cid = str(cid)
+    if not cid.isdigit():
+        return EditorialBuildResult(
+            ContestStatus.INVALID_STRUCTURE,
+            None,
+            {"error": "invalid-contest-id"},
+        )
+    page_fetcher = fetch_page or (
+        lambda url: fetch_url(url, timeout=timeout, retries=retries)
+    )
+
+    def transient(error: str) -> EditorialBuildResult:
+        return EditorialBuildResult(
+            ContestStatus.TRANSIENT_FAILURE,
+            None,
+            {"errors": [error]},
+        )
+
+    contest_url = f"https://codeforces.com/contest/{cid}"
+    try:
+        contest_html = page_fetcher(contest_url)
+    except Exception:
+        return transient("contest-page-fetch-failed")
+    if not isinstance(contest_html, str) or not contest_html:
+        return transient("contest-page-fetch-failed")
+    if any(marker in contest_html for marker in (
+        "Contest not found", "does not exist", "Just a moment", "403 Forbidden",
+    )):
+        return transient("contest-page-unrecognized")
+    source_url = _find_editorial_link(contest_html)
+    if source_url is None:
+        return transient("editorial-link-not-confirmed")
+    try:
+        base_html = page_fetcher(source_url)
+    except Exception:
+        return transient("editorial-page-fetch-failed")
+    if not isinstance(base_html, str) or not base_html:
+        return transient("editorial-page-fetch-failed")
+    if any(marker in base_html for marker in (
+        "403 Forbidden", "Just a moment", "nginx/", "Announcement of Codeforces Round",
+    )):
+        return transient("editorial-page-unrecognized")
+
+    try:
+        parsed_base = parse_blog_html(
+            base_html,
+            contest_id=cid,
+            source_url=source_url,
+        )
+    except ParseError as error:
+        return EditorialBuildResult(
+            ContestStatus.INVALID_STRUCTURE,
+            None,
+            {"error": str(error)},
+        )
+
+    codes: list[str] = []
+
+    def collect_slots(node: Node) -> None:
+        if node.kind == "tutorial_slot":
+            codes.append(str(node.attrs.get("problemCode", "")))
+        for child in node.children:
+            collect_slots(child)
+
+    collect_slots(parsed_base.root)
+    if fetch_tutorial is None:
+        batch = _fetch_problem_tutorial_fragments(cid, codes)
+    else:
+        batch = _tutorial_batch_from_responses(codes, fetch_tutorial)
+    localizer = asset_localizer or localize_editorial_assets
+    return build_editorial_document(
+        cid,
+        source_url,
+        base_html,
+        batch,
+        localizer,
+    )
+
+
+def _fetch_problem_tutorials(cid: str, codes: list) -> tuple[dict, list]:
     """通过 /data/problemTutorial API 获取动态 per-problem 题解。
     返回 {problemCode: markdown 内容}（去掉自带标题，避免与占位标题重复）"""
     import tempfile
@@ -555,7 +977,7 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> dict:
         capture_output=True, timeout=30).stdout.decode("utf-8", "replace")
     m = re.search(r"data-csrf='([a-f0-9]+)'", page)
     if not m:
-        return {}
+        return {}, []
     token = m.group(1)
     # 2. 逐个 POST problemCode
     out = {}
