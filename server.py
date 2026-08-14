@@ -141,7 +141,7 @@ def build_editorial_payload(contest_id, *, cache_root=None) -> dict:
     if document is not None:
         try:
             html = render_editorial_html(document)
-        except (ValueError, TypeError, KeyError) as error:
+        except Exception as error:
             return _editorial_error("invalid_structure", str(error))
         return {
             "format": "html",

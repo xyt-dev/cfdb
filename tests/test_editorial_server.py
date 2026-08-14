@@ -124,6 +124,74 @@ class EditorialServerTests(unittest.TestCase):
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
 
+    def test_malformed_cache_valid_document_fails_closed_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            editorial_directory = root / "editorials"
+            cache_root = editorial_directory / "v2"
+            failed_path = root / "failed_editorials.json"
+            failed_path.write_bytes(b'["9999"]\n')
+
+            store = GenerationStore.create(
+                cache_root,
+                "g1",
+                ["1700"],
+                parser_version="parser-1",
+                fixture_version="fixtures-1",
+            )
+            document = make_document()
+            document.root.children[0].children[0] = Node.from_dict({"kind": "text", "text": 42})
+            document_path = store.write_document(document)
+            store.set_status(
+                "1700",
+                ContestStatus.READY,
+                evidence={"validatedAt": "2026-08-14T10:00:00Z"},
+                document_path=document_path,
+            )
+            store.write_manifest()
+            activate_generation(cache_root, "g1")
+
+            def snapshot():
+                return {
+                    path.relative_to(root).as_posix(): (
+                        path.stat().st_size,
+                        path.stat().st_mtime_ns,
+                    )
+                    for path in root.rglob("*")
+                    if path.is_file()
+                }
+
+            expected = {
+                "format": None,
+                "html": None,
+                "status": "invalid_structure",
+                "known": False,
+                "error": "'int' object has no attribute 'find'",
+            }
+            before_files = snapshot()
+            before_failure_memory = failed_path.read_bytes()
+            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)), patch.object(
+                cfcrawl,
+                "FAILED_EDITORIALS",
+                str(failed_path),
+            ), patch.object(
+                cfcrawl,
+                "fetch_editorial_md",
+                side_effect=AssertionError("request-time crawl attempted"),
+            ), patch.object(
+                cfcrawl,
+                "_remember_failed_editorial",
+                side_effect=AssertionError("failure memory update attempted"),
+            ):
+                self.assertEqual(build_editorial_payload("1700", cache_root=cache_root), expected)
+                status, headers, body = self.request("/api/editorial?contestId=1700")
+
+            self.assertEqual(status, 500)
+            self.assertEqual(headers["Content-Type"], "application/json")
+            self.assertEqual(json.loads(body), expected)
+            self.assertEqual(snapshot(), before_files)
+            self.assertEqual(failed_path.read_bytes(), before_failure_memory)
+
     def test_known_absent_v2_payload_has_null_body(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
