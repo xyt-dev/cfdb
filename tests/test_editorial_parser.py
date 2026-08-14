@@ -125,3 +125,12 @@ class EditorialParserSemanticTests(unittest.TestCase):
         source = '<div class="ttypography">' + "<div>" * 5 + "x" + "</div>" * 5 + "</div>"
         with self.assertRaisesRegex(ParseError, "max-depth-exceeded"):
             parse_blog_html(source, contest_id="1", source_url="u", limits=ParseLimits(max_depth=3))
+
+    def test_malformed_link_url_is_dropped_without_uncontrolled_error(self):
+        source = '<div class="ttypography"><p><a href="http://[::1">kept text</a></p></div>'
+
+        result = parse_blog_html(source, contest_id="1", source_url="https://codeforces.com/blog/entry/1")
+        link = next(node for node in _walk(result.root) if node.kind == "link")
+
+        self.assertNotIn("href", link.attrs)
+        self.assertEqual(_plain_text(link), "kept text")

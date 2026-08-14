@@ -297,9 +297,14 @@ class _SemanticHTMLParser(HTMLParser):
             node_attrs = {}
             if tag == "a":
                 href = next((value or "" for name, value in attrs if name.lower() == "href"), "")
-                resolved = urljoin(self.source_url, href)
-                if urlsplit(resolved).scheme.lower() in self._SAFE_URL_SCHEMES:
-                    node_attrs["href"] = resolved
+                try:
+                    resolved = urljoin(self.source_url, href)
+                    scheme = urlsplit(resolved).scheme.lower()
+                except ValueError:
+                    resolved = None
+                else:
+                    if scheme in self._SAFE_URL_SCHEMES:
+                        node_attrs["href"] = resolved
             node = Node(kind=self._INLINE_KINDS[tag], attrs=node_attrs)
         else:
             return None
