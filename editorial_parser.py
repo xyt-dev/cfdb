@@ -381,48 +381,95 @@ class _TutorialHeadingExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=False)
         self.parts: list[str] = []
-        self.depth = 0
+        self.body_parts: list[str] = []
+        self.outer_depth = 0
+        self.heading_depth = 0
+        self.body_depth = 0
         self.complete = False
+        self.body_complete = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if self.complete:
-            return
-        if self.depth == 0:
-            if tag.lower() != "h3":
-                return
-            self.parts.append(self.get_starttag_text() or "")
-            self.depth = 1
-            return
-        self.parts.append(self.get_starttag_text() or "")
-        self.depth += 1
+        tag = tag.lower()
+        markup = self.get_starttag_text() or ""
+        is_void = tag in _SemanticHTMLParser._VOID_TAGS
+        if self.heading_depth:
+            self.parts.append(markup)
+            if not is_void:
+                self.heading_depth += 1
+        elif self.body_depth:
+            self.body_parts.append(markup)
+            if not is_void:
+                self.body_depth += 1
+        elif not self.complete and self.outer_depth == 0 and tag == "h3":
+            self.parts.append(markup)
+            self.heading_depth = 1
+        elif (
+            self.complete
+            and not self.body_complete
+            and self.outer_depth == 0
+            and tag == "div"
+            and "ttypography" in self._classes(attrs)
+        ):
+            self.body_parts.append(markup)
+            self.body_depth = 1
+        if not is_void:
+            self.outer_depth += 1
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if self.depth:
-            self.parts.append(self.get_starttag_text() or "")
+        tag = tag.lower()
+        markup = self.get_starttag_text() or ""
+        if self.heading_depth:
+            self.parts.append(markup)
+        elif self.body_depth:
+            self.body_parts.append(markup)
+        elif not self.complete and self.outer_depth == 0 and tag == "h3":
+            self.parts.append(markup)
+            self.complete = True
+        elif (
+            self.complete
+            and not self.body_complete
+            and self.outer_depth == 0
+            and tag == "div"
+            and "ttypography" in self._classes(attrs)
+        ):
+            self.body_parts.append(markup)
+            self.body_complete = True
 
     def handle_endtag(self, tag: str) -> None:
-        if not self.depth:
-            return
-        self.parts.append(f"</{tag}>")
-        self.depth -= 1
-        if self.depth == 0:
-            self.complete = True
+        if self.heading_depth:
+            self.parts.append(f"</{tag}>")
+            self.heading_depth -= 1
+            if self.heading_depth == 0:
+                self.complete = True
+        elif self.body_depth:
+            self.body_parts.append(f"</{tag}>")
+            self.body_depth -= 1
+            if self.body_depth == 0:
+                self.body_complete = True
+        if self.outer_depth:
+            self.outer_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        if self.depth:
-            self.parts.append(data)
+        self._append_content(data)
 
     def handle_entityref(self, name: str) -> None:
-        if self.depth:
-            self.parts.append(f"&{name};")
+        self._append_content(f"&{name};")
 
     def handle_charref(self, name: str) -> None:
-        if self.depth:
-            self.parts.append(f"&#{name};")
+        self._append_content(f"&#{name};")
 
     def handle_comment(self, data: str) -> None:
-        if self.depth:
-            self.parts.append(f"<!--{data}-->")
+        self._append_content(f"<!--{data}-->")
+
+    def _append_content(self, content: str) -> None:
+        if self.heading_depth:
+            self.parts.append(content)
+        elif self.body_depth:
+            self.body_parts.append(content)
+
+    def _classes(self, attrs: list[tuple[str, str | None]]) -> set[str]:
+        value = next((value or "" for name, value in attrs if name.lower() == "class"), "")
+        return set(value.split())
 
 
 def _parse_tutorial_parts(
@@ -438,6 +485,8 @@ def _parse_tutorial_parts(
     extractor.close()
     if not extractor.complete:
         raise ParseError("missing-tutorial-heading")
+    if not extractor.body_complete:
+        raise ParseError("missing-tutorial-body")
 
     heading_parser = _SemanticHTMLParser(
         mode="tutorial-heading",
@@ -459,7 +508,7 @@ def _parse_tutorial_parts(
         source_url="https://codeforces.com",
         limits=limits,
     )
-    body_parser.feed(html_text)
+    body_parser.feed("".join(extractor.body_parts))
     body_parser.close()
     body, body_diagnostics = body_parser.finish()
     if not body.children:
