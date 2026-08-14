@@ -1,105 +1,181 @@
 #!/usr/bin/env python3
-"""cfdb 数据更新脚本：重新抓取 CF 全量题目元数据并合并为 problems.json
+"""Update cfdb metadata, statements, and editorial caches."""
 
-用法:
-  python3 update.py                     # 刷新元数据 problems.json
-  python3 update.py --statements        # 全量预爬题面 → statements/*.md
-"""
+import argparse
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
+
+import cfcrawl
+from editorial_rebuild import rebuild_editorials, update_editorials, validate_editorial
+
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 API_URL = "https://codeforces.com/api/problemset.problems"
 UA = "Mozilla/5.0 (X11; Linux x86_64) cfdb-update/0.1"
 
+
 def fetch() -> bytes:
-    """调 curl 抓 API（静默），带重试"""
+    """Fetch the Codeforces API with the existing retry policy."""
     for attempt in range(3):
         try:
-            r = subprocess.run(
-                ["curl", "-sL", "--max-time", "120",
-                 "-H", f"User-Agent: {UA}",
-                 API_URL],
-                capture_output=True, timeout=150)
-            if r.returncode == 0 and r.stdout:
-                head = r.stdout[:256].lstrip()
+            result = subprocess.run(
+                [
+                    "curl", "-sL", "--max-time", "120",
+                    "-H", f"User-Agent: {UA}", API_URL,
+                ],
+                capture_output=True,
+                timeout=150,
+            )
+            if result.returncode == 0 and result.stdout:
+                head = result.stdout[:256].lstrip()
                 if head.startswith(b"<") or b"403 Forbidden" in head:
-                    # CF 反爬：IP 被封禁/限流——重试无意义，立即退出（保留旧数据）
                     print(
                         "❌ CF 拒绝访问（403，IP 可能被临时封禁/限流）。"
                         "本地数据不受影响；请稍后（数小时）再试。",
                         file=sys.stderr,
                     )
-                    sys.exit(1)
-                return r.stdout
+                    raise RuntimeError("Codeforces rejected the metadata request")
+                return result.stdout
+        except RuntimeError:
+            raise
         except Exception:
             pass
         print(f"⚠️ 第 {attempt + 1} 次抓取失败，重试...", file=sys.stderr)
         import time
         time.sleep(3 * (attempt + 1))
-    print("❌ 抓取失败（网络问题或 CF 限流，稍后重试）", file=sys.stderr)
-    sys.exit(1)
+    raise RuntimeError("metadata fetch failed")
 
-def main():
+
+def update_metadata() -> int:
     print("▸ 抓取 Codeforces API...")
-    raw = fetch()
     try:
-        d = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"❌ API 返回的不是合法 JSON: {e}", file=sys.stderr)
-        sys.exit(1)
-    if d.get("status") != "OK":
-        print(f"❌ API 返回异常: {d.get('status')} {d.get('comment', '')}", file=sys.stderr)
-        sys.exit(1)
+        raw = fetch()
+        data = json.loads(raw)
+    except (RuntimeError, json.JSONDecodeError) as error:
+        print(f"❌ 元数据更新失败: {error}", file=sys.stderr)
+        return 1
+    if data.get("status") != "OK":
+        print(
+            f"❌ API 返回异常: {data.get('status')} {data.get('comment', '')}",
+            file=sys.stderr,
+        )
+        return 1
 
-    result = d["result"]
-    stats = {f"{p['contestId']}{p['index']}": p["solvedCount"]
-             for p in result.get("problemStatistics", [])}
-    out = []
-    for p in result.get("problems", []):
-        key = f"{p['contestId']}{p['index']}"
-        out.append({
-            "id": key,
-            "contestId": p["contestId"],
-            "index": p["index"],
-            "name": p["name"],
-            "rating": p.get("rating"),
-            "tags": p.get("tags", []),
-            "solvedCount": stats.get(key, 0),
-            "url": f"https://codeforces.com/contest/{p['contestId']}/problem/{p['index']}",
-        })
+    result = data["result"]
+    stats = {
+        f"{problem['contestId']}{problem['index']}": problem["solvedCount"]
+        for problem in result.get("problemStatistics", [])
+    }
+    output = []
+    for problem in result.get("problems", []):
+        key = f"{problem['contestId']}{problem['index']}"
+        output.append(
+            {
+                "id": key,
+                "contestId": problem["contestId"],
+                "index": problem["index"],
+                "name": problem["name"],
+                "rating": problem.get("rating"),
+                "tags": problem.get("tags", []),
+                "solvedCount": stats.get(key, 0),
+                "url": (
+                    f"https://codeforces.com/contest/{problem['contestId']}"
+                    f"/problem/{problem['index']}"
+                ),
+            }
+        )
 
-    out_path = os.path.join(ROOT, "problems.json")
-    tmp = out_path + ".tmp"
+    output_path = os.path.join(ROOT, "problems.json")
+    temporary = output_path + ".tmp"
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(out, f)
-    except OSError as e:
-        print(f"❌ 写入 problems.json 失败: {e}", file=sys.stderr)
-        sys.exit(1)
-    os.replace(tmp, out_path)  # 原子替换，避免写一半
+        with open(temporary, "w", encoding="utf-8") as output_file:
+            json.dump(output, output_file)
+        os.replace(temporary, output_path)
+    except OSError as error:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        print(f"❌ 写入 problems.json 失败: {error}", file=sys.stderr)
+        return 1
 
-    rated = sum(1 for p in out if p["rating"])
-    size = os.path.getsize(out_path) / 1024 / 1024
-    print(f"✅ 更新完成: {len(out)} 题（有 rating: {rated}）| problems.json {size:.1f} MB")
+    rated = sum(1 for problem in output if problem["rating"])
+    size = os.path.getsize(output_path) / 1024 / 1024
+    print(
+        f"✅ 更新完成: {len(output)} 题（有 rating: {rated}）"
+        f"| problems.json {size:.1f} MB"
+    )
     print("   服务器运行中会自动读取新数据（下次刷新页面生效）")
+    return 0
 
-def main_crawl():
-    """预爬模式: --statements 全量题面"""
-    import cfcrawl
-    delay = 0.4  # 请求间隔（秒），避免触发反爬
+
+def main_crawl() -> int:
+    """Run the existing full statement pre-crawl."""
+    delay = 0.4
     print(f"▸ 全量预爬题面（间隔 {delay}s，可 Ctrl+C 中断续跑）...")
     total, cached, fetched = cfcrawl.fetch_all_statements(delay=delay)
     print(f"✅ 题面: 共 {total} | 缓存 {cached} | 新爬 {fetched}")
+    return 0
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Refresh cfdb metadata or crawl statements/editorials.",
+    )
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
+        "--statements",
+        action="store_true",
+        help="crawl and cache problem statements",
+    )
+    modes.add_argument(
+        "--editorials",
+        action="store_true",
+        help="update editorials (legacy before v2 activation, incremental afterward)",
+    )
+    modes.add_argument(
+        "--validate-editorial",
+        metavar="CONTEST_ID",
+        help="build and validate one editorial without activation",
+    )
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="with --editorials, build a full inactive v2 generation",
+    )
+    return parser
+
+
+def main(argv=None) -> int:
+    parser = build_argument_parser()
+    args = parser.parse_args(argv)
+    if args.rebuild and not args.editorials:
+        parser.error("--rebuild requires --editorials")
+
+    if args.statements:
+        return main_crawl()
+    if args.validate_editorial is not None:
+        report = validate_editorial(args.validate_editorial)
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        return 0 if report.get("ok") is True else 1
+    if args.editorials:
+        if args.rebuild:
+            report = rebuild_editorials()
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+            return 0 if report.get("activated") is True else 1
+        pointer = Path(cfcrawl.EDITORIAL_DIR) / "v2" / "current.json"
+        if pointer.is_file():
+            report = update_editorials()
+            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+            return 0 if report.get("activated") is True else 1
+        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=1.5)
+        print(f"✅ 题解: 共 {total} 场比赛 | 已有 {cached} | 新爬 {fetched}")
+        return 0
+    return update_metadata()
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if "--statements" in args:
-        main_crawl()
-    elif "--help" in args or "-h" in args:
-        print(__doc__)
-    else:
-        main()
+    raise SystemExit(main())

@@ -12,6 +12,7 @@ import urllib.parse
 
 import cfcrawl
 from editorial_cache import ContestStatus, GenerationStore, load_active_document
+from editorial_rebuild import update_editorials
 from editorial_render import render_editorial_html
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -58,9 +59,34 @@ def auto_update():
         print(f"[auto-update] ✅ 题面: 共 {total} | 已有 {cached} | 新爬 {fetched}")
 
         crawl_state["stage"] = "editorials"
-        print("[auto-update] 增量爬取缺失题解...")
-        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=1.5, on_progress=_on_progress)
-        print(f"[auto-update] ✅ 题解: 共 {total} 场比赛 | 已有 {cached} | 新爬 {fetched}")
+        v2_pointer = os.path.join(cfcrawl.EDITORIAL_DIR, "v2", "current.json")
+        if os.path.isfile(v2_pointer):
+            print("[auto-update] 构建增量 v2 题解代际...")
+            report = update_editorials()
+            counts = report["counts"]
+            crawl_state.update(
+                generationId=report["generationId"],
+                statusCounts=counts,
+                total=sum(counts.values()),
+                cached=counts["ready"],
+                fetched=counts["ready"],
+                failed=counts["transient_failure"] + counts["invalid_structure"],
+            )
+            print(
+                f"[auto-update] ✅ v2 题解代际 {report['generationId']}: "
+                f"ready {counts['ready']} | known_absent {counts['known_absent']} | "
+                f"failed {counts['transient_failure'] + counts['invalid_structure']}"
+            )
+        else:
+            print("[auto-update] 增量爬取缺失题解...")
+            total, cached, fetched = cfcrawl.fetch_all_editorials(
+                delay=1.5,
+                on_progress=_on_progress,
+            )
+            print(
+                f"[auto-update] ✅ 题解: 共 {total} 场比赛 | "
+                f"已有 {cached} | 新爬 {fetched}"
+            )
 
         crawl_state["stage"] = "done"
         print("[auto-update] ✅ 全部完成")
