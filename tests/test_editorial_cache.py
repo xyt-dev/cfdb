@@ -1,10 +1,14 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+
+import editorial_cache
 
 from editorial_cache import (
     ContestStatus,
@@ -86,6 +90,27 @@ class EditorialCacheTests(unittest.TestCase):
             unsupported.schema = 999
             with self.assertRaisesRegex(ValueError, "unsupported document schema"):
                 store.write_document(unsupported)
+
+    def test_create_fsyncs_root_after_adding_generations_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = []
+            original = editorial_cache._fsync_directory
+
+            with RebuildLock(root) as lock, patch(
+                "editorial_cache._fsync_directory",
+                side_effect=lambda path: (calls.append(Path(path)), original(Path(path)))[1],
+            ):
+                GenerationStore.create(
+                    root,
+                    "g1",
+                    ["1700"],
+                    parser_version="parser-1",
+                    fixture_version="fixtures-1",
+                    lock=lock,
+                )
+
+            self.assertIn(root, calls)
 
     def test_incomplete_generation_cannot_activate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -266,6 +291,211 @@ class EditorialCacheTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "caller-held writer lock is invalid"):
                     activate_generation(root, "g1", lock=wrong_lock)
             self.assertFalse((root / "current.json").exists())
+
+    def test_document_digest_detects_tampering_on_load_and_reactivation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self.create_store(root, "g1", ["1700"])
+            self.ready_contest(store, make_document(text="original"))
+            store.write_manifest()
+            activate_generation(root, "g1")
+            manifest_path = store.path / "manifest.json"
+            manifest_bytes = manifest_path.read_bytes()
+            manifest = json.loads(manifest_bytes)
+            document_bytes = (store.path / "documents" / "1700.json").read_bytes()
+            pointer = json.loads((root / "current.json").read_text(encoding="utf-8"))
+            self.assertTrue(manifest["finalizedAt"])
+            self.assertEqual(
+                manifest["contests"]["1700"]["documentSha256"],
+                hashlib.sha256(document_bytes).hexdigest(),
+            )
+            self.assertEqual(
+                pointer["manifestSha256"],
+                hashlib.sha256(manifest_bytes).hexdigest(),
+            )
+
+            atomic_write_json(
+                store.path / "documents" / "1700.json",
+                make_document(text="tampered").to_dict(),
+            )
+            with self.assertRaises(ValueError):
+                load_active_document(root, "1700")
+            with self.assertRaisesRegex(ValueError, "activation-ready"):
+                activate_generation(root, "g1")
+
+    def test_finalized_and_retained_generations_reject_all_mutators(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            g1 = self.create_store(root, "g1", ["1700"])
+            self.ready_contest(g1, make_document(text="one"))
+            g1.write_manifest()
+            activate_generation(root, "g1")
+
+            g2 = self.create_store(root, "g2", ["1700"])
+            self.ready_contest(g2, make_document(text="two"))
+            g2.write_manifest()
+            activate_generation(root, "g2")
+
+            operations = [
+                lambda: g1.write_document(make_document(text="changed")),
+                lambda: g1.set_status(
+                    "1700",
+                    ContestStatus.TRANSIENT_FAILURE,
+                    evidence={"error": "changed"},
+                ),
+                lambda: g1.seed_from(g2),
+                lambda: g1.write_manifest(),
+            ]
+            for operation in operations:
+                with self.subTest(operation=operation):
+                    with self.assertRaisesRegex(RuntimeError, "finalized"):
+                        operation()
+
+            never_activated = self.create_store(root, "g3", ["1700"])
+            self.ready_contest(never_activated, make_document(text="three"))
+            never_activated.write_manifest()
+            with self.assertRaisesRegex(RuntimeError, "finalized"):
+                never_activated.write_document(make_document(text="changed"))
+
+    def test_generation_mutations_share_writer_lock_without_nested_deadlock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with RebuildLock(root) as lock:
+                store = GenerationStore.create(
+                    root,
+                    "g1",
+                    ["1700"],
+                    parser_version="parser-1",
+                    fixture_version="fixtures-1",
+                    lock=lock,
+                )
+                path = store.write_document(make_document(), lock=lock)
+                store.set_status(
+                    "1700",
+                    ContestStatus.READY,
+                    evidence={"validatedAt": "2026-08-14T10:00:00Z"},
+                    document_path=path,
+                    lock=lock,
+                )
+                store.write_manifest(lock=lock)
+                successor = GenerationStore.create(
+                    root,
+                    "seeded",
+                    ["1700", "2000"],
+                    parser_version="parser-1",
+                    fixture_version="fixtures-1",
+                    lock=lock,
+                )
+                successor.seed_from(store, lock=lock)
+                self.assertEqual(successor.load_document("1700"), make_document())
+                activate_generation(root, "g1", lock=lock)
+
+            draft = self.create_store(root, "g2", ["1700"])
+            with RebuildLock(root):
+                with self.assertRaisesRegex(RuntimeError, "writer lock is unavailable"):
+                    draft.write_document(make_document())
+
+    def test_manifest_requires_canonical_bytes_and_exact_top_level_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self.create_store(root, "g1", ["1700"])
+            manifest_path = store.path / "manifest.json"
+            original = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+            manifest_path.write_text(json.dumps(original, indent=2), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "canonical"):
+                GenerationStore.open(root, "g1")
+
+            variants = []
+            missing = dict(original)
+            del missing["createdAt"]
+            variants.append(missing)
+            extra = dict(original)
+            extra["unexpected"] = True
+            variants.append(extra)
+            wrong_type = dict(original)
+            wrong_type["parserVersion"] = 1
+            variants.append(wrong_type)
+            for manifest in variants:
+                with self.subTest(manifest=manifest):
+                    atomic_write_json(manifest_path, manifest)
+                    with self.assertRaises(ValueError):
+                        GenerationStore.open(root, "g1")
+
+    def test_manifest_rejects_incomplete_status_fields_evidence_and_timestamps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self.create_store(root, "g1", ["1700", "9999"])
+            self.ready_contest(store, make_document())
+            store.set_status(
+                "9999",
+                ContestStatus.KNOWN_ABSENT,
+                evidence=CHECKED_ABSENCE,
+            )
+            store.write_manifest()
+            manifest_path = store.path / "manifest.json"
+            original = json.loads(manifest_path.read_text(encoding="utf-8"))
+            ready = original["contests"]["1700"]
+            self.assertIn("documentSha256", ready)
+
+            variants = []
+            for field in ("documentSha256", "updatedAt", "evidence"):
+                variant = json.loads(json.dumps(original))
+                del variant["contests"]["1700"][field]
+                variants.append(variant)
+            invalid_timestamp = json.loads(json.dumps(original))
+            invalid_timestamp["contests"]["1700"]["updatedAt"] = "not-a-timestamp"
+            variants.append(invalid_timestamp)
+            incomplete_evidence = json.loads(json.dumps(original))
+            del incomplete_evidence["contests"]["9999"]["evidence"]["contestPageReceipts"]
+            variants.append(incomplete_evidence)
+            extra_status_field = json.loads(json.dumps(original))
+            extra_status_field["contests"]["1700"]["unexpected"] = True
+            variants.append(extra_status_field)
+
+            for manifest in variants:
+                with self.subTest(manifest=manifest):
+                    atomic_write_json(manifest_path, manifest)
+                    with self.assertRaises(ValueError):
+                        activate_generation(root, "g1")
+
+    def test_pointer_requires_canonical_bytes_schema_hash_timestamp_and_exact_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self.create_store(root, "g1", ["1700"])
+            self.ready_contest(store, make_document())
+            store.write_manifest()
+            activate_generation(root, "g1")
+            pointer_path = root / "current.json"
+            original = json.loads(pointer_path.read_text(encoding="utf-8"))
+
+            pointer_path.write_text(json.dumps(original, indent=2), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "canonical"):
+                load_active_document(root, "1700")
+
+            variants = []
+            for field in ("schema", "manifestSha256", "activatedAt"):
+                variant = dict(original)
+                del variant[field]
+                variants.append(variant)
+            wrong_schema = dict(original)
+            wrong_schema["schema"] = "2"
+            variants.append(wrong_schema)
+            wrong_hash = dict(original)
+            wrong_hash["manifestSha256"] = "not-a-hash"
+            variants.append(wrong_hash)
+            wrong_timestamp = dict(original)
+            wrong_timestamp["activatedAt"] = "not-a-timestamp"
+            variants.append(wrong_timestamp)
+            extra = dict(original)
+            extra["unexpected"] = True
+            variants.append(extra)
+
+            for pointer in variants:
+                with self.subTest(pointer=pointer):
+                    atomic_write_json(pointer_path, pointer)
+                    with self.assertRaises(ValueError):
+                        load_active_document(root, "1700")
 
     def test_seed_successor_hardlinks_or_copies_ready_documents(self):
         with tempfile.TemporaryDirectory() as directory:
