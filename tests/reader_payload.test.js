@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { normalizeApiPayload, prepareBody } = require("../reader_payload.js");
+const {
+	normalizeApiPayload,
+	prepareBody,
+	prepareSourceUrl,
+} = require("../reader_payload.js");
 
 test("v2 html bypasses markdown parsing and heading normalization", () => {
 	const payload = normalizeApiPayload({
@@ -95,4 +99,30 @@ test("invalid structured payloads fail closed", () => {
 		),
 		null,
 	);
+});
+
+test("source URLs are strictly validated and escaped for an HTML attribute", () => {
+	assert.equal(
+		prepareSourceUrl(
+			'https://codeforces.com/blog/entry/1?lang=en&note="quoted"',
+		),
+		"https://codeforces.com/blog/entry/1?lang=en&amp;note=%22quoted%22",
+	);
+	assert.equal(
+		prepareSourceUrl("https://codeforces.com/contest/1700/problem/A"),
+		"https://codeforces.com/contest/1700/problem/A",
+	);
+});
+
+test("source URLs reject hostile or non-Codeforces destinations", () => {
+	for (const url of [
+		"javascript:alert(1)",
+		"data:text/html,<script>alert(1)</script>",
+		"http://codeforces.com/blog/entry/1",
+		"https://codeforces.com.evil.example/blog/entry/1",
+		"https://evil.example@codeforces.com/blog/entry/1",
+		"/vendor/tex-svg-full.js",
+	]) {
+		assert.equal(prepareSourceUrl(url), null, url);
+	}
 });

@@ -4,7 +4,7 @@ import tempfile
 import threading
 import unittest
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 import cfcrawl
@@ -83,7 +83,7 @@ class EditorialServerTests(unittest.TestCase):
         activate_generation(root, "g1")
         return store
 
-    def request(self, path):
+    def request(self, path, headers=None):
         import http.server
 
         httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -91,8 +91,9 @@ class EditorialServerTests(unittest.TestCase):
         thread.start()
         try:
             url = f"http://127.0.0.1:{httpd.server_address[1]}{path}"
+            request = Request(url, headers=headers or {})
             try:
-                with urlopen(url, timeout=5) as response:
+                with urlopen(request, timeout=5) as response:
                     return response.status, dict(response.headers), response.read()
             except HTTPError as error:
                 try:
@@ -337,6 +338,32 @@ class EditorialServerTests(unittest.TestCase):
             self.assertEqual(headers["Content-Type"], "application/javascript; charset=utf-8")
             self.assertEqual(body, source)
             self.assertEqual(nested_status, 404)
+
+    def test_opaque_origin_font_response_has_narrow_cors_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vendor = root / "vendor"
+            vendor.mkdir()
+            font = b"local-font-bytes"
+            (vendor / "ReaderFont.otf").write_bytes(font)
+            with patch("server.ROOT", str(root)):
+                status, headers, body = self.request(
+                    "/vendor/ReaderFont.otf",
+                    headers={"Origin": "null"},
+                )
+                api_status, api_headers, _ = self.request(
+                    "/api/editorial?contestId=../1700",
+                    headers={"Origin": "null"},
+                )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "font/otf")
+        self.assertEqual(headers["Access-Control-Allow-Origin"], "null")
+        self.assertEqual(body, font)
+        self.assertEqual(api_status, 400)
+        self.assertEqual(api_headers["Content-Type"], "application/json")
+        self.assertEqual(api_headers["Cache-Control"], "no-store")
+        self.assertNotIn("Access-Control-Allow-Origin", api_headers)
 
 
 if __name__ == "__main__":

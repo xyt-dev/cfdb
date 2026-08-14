@@ -1738,20 +1738,22 @@
       }
 
       function contentFrame(payload) {
-        const url = payload.url || (currentProblem ? currentProblem.url : "");
+        const sourceUrl = CFDBReaderPayload.prepareSourceUrl(
+          payload.url || (currentProblem ? currentProblem.url : null),
+        );
         let html = CFDBReaderPayload.prepareBody(
           payload,
           prepareMarkdownHtml,
           (markdownHtml) =>
-            normalizeProblemHeaders(markdownHtml, url, problemHref),
+            normalizeProblemHeaders(markdownHtml, sourceUrl, problemHref),
         );
         if (html == null) html = "";
         // srcdoc interpolation must not allow either payload format to close a script element.
         html = html.replace(/<\/script/gi, "&lt;/script");
-        return htmlFrame(html, url);
+        return htmlFrame(html, sourceUrl);
       }
 
-      function htmlFrame(html, url) {
+      function htmlFrame(html, sourceUrl) {
         const c = themeColors();
         const frame = el("iframe", "statement-frame");
         frame.setAttribute(
@@ -1832,7 +1834,7 @@ blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px;
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]},startup:{typeset:false}};<\/script>
 <script src="/vendor/tex-svg-full.js"><\/script>
-</head><body>${url ? `<div class="topwrap"><a class="open" href="${url}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="md">${html}</div>
+</head><body>${sourceUrl ? `<div class="topwrap"><a class="open" href="${sourceUrl}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="md">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
 /* 样例/代码框复制按钮：clipboard API（安全上下文）→ execCommand fallback（任何浏览器） */

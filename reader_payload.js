@@ -38,6 +38,29 @@
 		};
 	}
 
+	function prepareSourceUrl(value) {
+		if (typeof value !== "string" || !value) return null;
+		let parsed;
+		try {
+			parsed = new URL(value);
+		} catch (error) {
+			return null;
+		}
+		if (
+			parsed.origin !== "https://codeforces.com" ||
+			parsed.username ||
+			parsed.password
+		) {
+			return null;
+		}
+		return parsed.href
+			.replace(/&/g, "&amp;")
+			.replace(/"/g, "&quot;")
+			.replace(/'/g, "&#39;")
+			.replace(/</g, "&lt;")
+			.replace(/>/g, "&gt;");
+	}
+
 	function prepareBody(payload, markdownRenderer, markdownNormalizer) {
 		if (payload.format === "html") return payload.body;
 		if (payload.format === "markdown") {
@@ -46,5 +69,5 @@
 		return null;
 	}
 
-	return { normalizeApiPayload, prepareBody };
+	return { normalizeApiPayload, prepareBody, prepareSourceUrl };
 });

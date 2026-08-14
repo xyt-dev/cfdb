@@ -169,12 +169,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # 静默日志
 
-    def _send(self, code, body, ctype):
+    def _send(self, code, body, ctype, *, allow_opaque_origin=False):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         # 开发期禁用缓存：改代码后刷新即生效，避免旧版 JS 残留
         self.send_header("Cache-Control", "no-store")
+        if allow_opaque_origin and self.headers.get("Origin") == "null":
+            self.send_header("Access-Control-Allow-Origin", "null")
         self.end_headers()
         self.wfile.write(body)
 
@@ -231,7 +233,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         }[os.path.splitext(name)[1].lower()]
                     else:
                         ctype = "application/octet-stream"
-                    self._send(200, f.read(), ctype)
+                    self._send(
+                        200,
+                        f.read(),
+                        ctype,
+                        allow_opaque_origin=name.endswith((".otf", ".ttf")),
+                    )
             except OSError:
                 self._send(404, b"not found", "text/plain")
         elif u.path == "/api/problems":
