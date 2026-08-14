@@ -11,6 +11,8 @@ import threading
 import urllib.parse
 
 import cfcrawl
+from editorial_cache import ContestStatus, GenerationStore, load_active_document
+from editorial_render import render_editorial_html
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 try:
@@ -79,6 +81,90 @@ def _valid_ref(cid: str, idx: str) -> bool:
     return bool(idx.isalnum() and 0 < len(idx) <= 3)
 
 
+def _valid_contest_id(contest_id: str) -> bool:
+    return contest_id.isdigit() and 0 < len(contest_id) <= 6
+
+
+def _editorial_error(status: str, error: str) -> dict:
+    return {
+        "format": None,
+        "html": None,
+        "status": status,
+        "known": False,
+        "error": error,
+    }
+
+
+def build_editorial_payload(contest_id, *, cache_root=None) -> dict:
+    """Read one editorial from the active v2 generation or pre-v2 Markdown."""
+    contest_id = str(contest_id)
+    if not _valid_contest_id(contest_id):
+        return _editorial_error("invalid_ref", "invalid ref")
+
+    root = os.fspath(cache_root) if cache_root is not None else os.path.join(cfcrawl.EDITORIAL_DIR, "v2")
+    pointer_path = os.path.join(root, "current.json")
+    try:
+        with open(pointer_path, "rb") as pointer_file:
+            pointer_bytes = pointer_file.read()
+    except FileNotFoundError:
+        md = cfcrawl.read_editorial_md(contest_id)
+        url = cfcrawl.read_editorial_url(contest_id)
+        known = not md and contest_id in cfcrawl._load_failed_editorials()
+        if md and md.startswith("<!-- url:"):
+            newline = md.find("\n")
+            md = md[newline + 1:] if newline >= 0 else ""
+        return {
+            "format": "markdown",
+            "md": md,
+            "url": url,
+            "known": known,
+        }
+    except OSError as error:
+        return _editorial_error("invalid_structure", str(error))
+
+    try:
+        document = None
+        for _ in range(3):
+            document = load_active_document(root, contest_id)
+            with open(pointer_path, "rb") as pointer_file:
+                current_pointer_bytes = pointer_file.read()
+            if current_pointer_bytes == pointer_bytes:
+                break
+            pointer_bytes = current_pointer_bytes
+        else:
+            return _editorial_error("invalid_structure", "active generation changed during read")
+        generation_id = json.loads(pointer_bytes)["generationId"]
+        store = GenerationStore.open(root, generation_id)
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        return _editorial_error("invalid_structure", str(error))
+
+    if document is not None:
+        try:
+            html = render_editorial_html(document)
+        except (ValueError, TypeError, KeyError) as error:
+            return _editorial_error("invalid_structure", str(error))
+        return {
+            "format": "html",
+            "schema": document.schema,
+            "html": html,
+            "url": document.source_url,
+            "known": True,
+            "status": "ready",
+        }
+
+    entry = store.manifest["contests"].get(contest_id)
+    if not isinstance(entry, dict):
+        return _editorial_error("invalid_structure", "active manifest missing contest")
+    if entry.get("status") == ContestStatus.KNOWN_ABSENT.value:
+        return {
+            "format": None,
+            "html": None,
+            "status": "known_absent",
+            "known": True,
+        }
+    return _editorial_error("invalid_structure", "active manifest has non-terminal contest")
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # 静默日志
@@ -100,6 +186,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/html; charset=utf-8")
             except OSError:
                 self._send(500, b"index.html not found", "text/plain")
+        elif u.path == "/reader_payload.js":
+            try:
+                with open(os.path.join(ROOT, "reader_payload.js"), "rb") as f:
+                    self._send(200, f.read(), "application/javascript; charset=utf-8")
+            except OSError:
+                self._send(404, b"not found", "text/plain")
         elif u.path.endswith(".html") and "/" not in u.path[1:-5]:
             # 通用静态页面（test.html 等调试页）
             try:
@@ -171,29 +263,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif u.path == "/api/editorial":
             q = urllib.parse.parse_qs(u.query)
             cid = q.get("contestId", [""])[0]
-            if not (cid.isdigit() and 0 < len(cid) <= 6):
-                self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
+            if not _valid_contest_id(cid):
+                payload = _editorial_error("invalid_ref", "invalid ref")
+                self._send(400, json.dumps(payload).encode(), "application/json")
             else:
-                md = cfcrawl.read_editorial_md(cid)
-                if not md and str(cid) in cfcrawl._load_failed_editorials():
-                    # 已确认无 Editorial → 立即返回，不再请求 CF（秒回）
-                    self._send(200, json.dumps({"md": None, "url": None, "known": True}).encode(), "application/json")
-                    return
-                known = False
-                if not md:
-                    md = cfcrawl.fetch_editorial_md(cid)
-                    if not md:
-                        # 按需探测也记忆（确认无题解/网络失败）→ 下次秒回
-                        # 公告态（@announcement）不记：题解发布后可自动爬取
-                        if f"{cid}@announcement" not in cfcrawl._load_failed_editorials():
-                            cfcrawl._remember_failed_editorial(cid)
-                            known = True
-                url = cfcrawl.read_editorial_url(cid)
-                if md and md.startswith("<!-- url:"):
-                    # 剥离首行注释（纯 md 返回给前端）
-                    idx = md.find("\n")
-                    md = md[idx + 1:] if idx >= 0 else ""
-                self._send(200, json.dumps({"md": md, "url": url, "known": known}).encode(), "application/json")
+                payload = build_editorial_payload(cid)
+                code = 500 if payload.get("status") == "invalid_structure" else 200
+                self._send(code, json.dumps(payload).encode(), "application/json")
         elif u.path == "/api/solution":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]
@@ -218,8 +294,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except (AttributeError, OSError):
+        reconfigure_stdout = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure_stdout is not None:
+            reconfigure_stdout(line_buffering=True)
+    except OSError:
         pass
     print(f"cfdb 服务器启动: http://localhost:{PORT}", flush=True)
     try:
