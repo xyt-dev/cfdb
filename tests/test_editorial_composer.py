@@ -60,6 +60,21 @@ class EditorialComposerTests(unittest.TestCase):
         with self.assertRaisesRegex(ParseError, "problem-code-mismatch:1700A:1700B"):
             parse_tutorial_fragment(fixture("1700/tutorial-A.html"), expected_code="1700B")
 
+    def test_fragment_uses_typography_following_selected_outer_heading(self):
+        source = (
+            '<div class="ttypography"><p>UNRELATED_BODY</p></div>'
+            '<h3><a href="/contest/1700/problem/A">1700A - Optimal Path</a></h3>'
+            '<div class="ttypography"><p>FOLLOWING_BODY</p></div>'
+            '<h3><a href="/contest/1700/problem/B">1700B - Palindromic Numbers</a></h3>'
+            '<div class="ttypography"><p>LATER_BODY</p></div>'
+        )
+
+        fragment = parse_tutorial_fragment(source, expected_code="1700A")
+
+        self.assertIn("FOLLOWING_BODY", plain_text(fragment))
+        self.assertNotIn("UNRELATED_BODY", plain_text(fragment))
+        self.assertNotIn("LATER_BODY", plain_text(fragment))
+
     def test_missing_code_removes_only_its_exact_slot(self):
         tutorials = {code: node for code, node in self.tutorials.items() if code != "1700C"}
         composed = compose_tutorials(self.document, tutorials=tutorials, missing_codes={"1700C"})
