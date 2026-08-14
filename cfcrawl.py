@@ -6,6 +6,7 @@
 """
 import copy
 from dataclasses import dataclass
+import errno
 import json
 import os
 import re
@@ -13,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import zlib
 
 import html2md
@@ -715,13 +716,16 @@ def _fsync_asset_directory(directory: str) -> None:
         flags |= os.O_DIRECTORY
     try:
         descriptor = os.open(directory, flags)
-    except OSError:
-        return
+    except OSError as error:
+        if error.errno in {errno.EACCES, errno.EINVAL, errno.ENOTSUP}:
+            return
+        raise
     try:
         try:
             os.fsync(descriptor)
-        except OSError:
-            pass
+        except OSError as error:
+            if error.errno not in {errno.EBADF, errno.EINVAL, errno.ENOTSUP}:
+                raise
     finally:
         os.close(descriptor)
 
@@ -791,7 +795,7 @@ def localize_editorial_assets(
                 parsed_source = urlsplit(source)
             except ValueError:
                 return missing_asset(node, source, path)
-            extension = os.path.splitext(parsed_source.path)[1].lower()
+            extension = os.path.splitext(unquote(parsed_source.path))[1].lower()
             if extension == ".svg":
                 return missing_asset(node, source, path)
             if source.startswith("/eimages/") and extension in {
@@ -807,31 +811,30 @@ def localize_editorial_assets(
             name = f"{localized.contest_id}_{image_number}{extension}"
             target = os.path.join(image_dir, name)
             route = f"/eimages/{name}"
-            if not os.path.isfile(target):
-                try:
-                    payload = image_fetcher(source)
-                except Exception:
-                    payload = None
-                if not isinstance(payload, bytes) or not payload:
-                    raise _TransientAssetError(
-                        Diagnostic(
-                            "error",
-                            "editorial-asset-transient-failure",
-                            source,
-                            path,
-                        )
+            try:
+                payload = image_fetcher(source)
+            except Exception:
+                payload = None
+            if not isinstance(payload, bytes) or not payload:
+                raise _TransientAssetError(
+                    Diagnostic(
+                        "error",
+                        "editorial-asset-transient-failure",
+                        source,
+                        path,
                     )
-                try:
-                    _atomic_write_editorial_asset(target, payload)
-                except OSError:
-                    raise _TransientAssetError(
-                        Diagnostic(
-                            "error",
-                            "editorial-asset-write-failed",
-                            source,
-                            path,
-                        )
-                    ) from None
+                )
+            try:
+                _atomic_write_editorial_asset(target, payload)
+            except OSError:
+                raise _TransientAssetError(
+                    Diagnostic(
+                        "error",
+                        "editorial-asset-write-failed",
+                        source,
+                        path,
+                    )
+                ) from None
             node.attrs["src"] = route
             if route not in localized_assets:
                 localized_assets.append(route)
