@@ -1,9 +1,12 @@
+import errno
 import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from cfcrawl import (
+    _fsync_asset_directory,
     EditorialBuildResult,
     TutorialBatch,
     build_editorial_document,
@@ -238,6 +241,76 @@ class EditorialCrawlerTests(unittest.TestCase):
                 "https://codeforces.com/images/blocked.png",
             )
 
+    def test_preexisting_asset_is_refetched_and_atomically_replaced_before_rewrite(self):
+        document = document_with_image("https://codeforces.com/images/diagram.png")
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "1700_1.png"
+            target.write_bytes(b"CORRUPT_PREEXISTING_ASSET")
+
+            def fetch_image(url: str) -> bytes:
+                self.assertEqual(url, "https://codeforces.com/images/diagram.png")
+                self.assertEqual(target.read_bytes(), b"CORRUPT_PREEXISTING_ASSET")
+                self.assertEqual(
+                    document.root.children[0].attrs["src"],
+                    "https://codeforces.com/images/diagram.png",
+                )
+                return b"VERIFIED_REPLACEMENT_ASSET"
+
+            result = localize_editorial_assets(
+                document,
+                image_dir=directory,
+                image_fetcher=fetch_image,
+            )
+
+            self.assertIs(result.status, ContestStatus.READY)
+            assert result.document is not None
+            self.assertEqual(target.read_bytes(), b"VERIFIED_REPLACEMENT_ASSET")
+            self.assertEqual(
+                result.document.root.children[0].attrs["src"],
+                "/eimages/1700_1.png",
+            )
+            self.assertEqual(
+                sorted(path.name for path in Path(directory).iterdir()),
+                ["1700_1.png"],
+            )
+
+    def test_directory_fsync_ignores_only_explicitly_unsupported_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for error_number in (errno.EINVAL, errno.ENOTSUP):
+                with self.subTest(operation="fsync", errno=error_number):
+                    with patch(
+                        "cfcrawl.os.fsync",
+                        side_effect=OSError(error_number, "unsupported"),
+                    ):
+                        _fsync_asset_directory(directory)
+
+            with patch(
+                "cfcrawl.os.open",
+                side_effect=OSError(errno.ENOTSUP, "unsupported"),
+            ):
+                _fsync_asset_directory(directory)
+
+    def test_directory_fsync_propagates_real_durability_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for error_number in (errno.EIO, errno.ENOSPC):
+                with self.subTest(operation="fsync", errno=error_number):
+                    with patch(
+                        "cfcrawl.os.fsync",
+                        side_effect=OSError(error_number, "durability failure"),
+                    ):
+                        with self.assertRaises(OSError) as raised:
+                            _fsync_asset_directory(directory)
+                    self.assertEqual(raised.exception.errno, error_number)
+
+            with patch(
+                "cfcrawl.os.open",
+                side_effect=OSError(errno.EIO, "directory open failure"),
+            ):
+                with self.assertRaises(OSError) as raised:
+                    _fsync_asset_directory(directory)
+            self.assertEqual(raised.exception.errno, errno.EIO)
+
     def test_transient_image_failure_prevents_ready_document(self):
         document = document_with_image("https://codeforces.com/images/diagram.png")
 
@@ -279,6 +352,49 @@ class EditorialCrawlerTests(unittest.TestCase):
                 "editorial-asset-unsupported",
                 [item.code for item in result.document.diagnostics],
             )
+
+    def test_encoded_and_mixed_case_svg_paths_are_confirmed_missing(self):
+        sources = [
+            "https://codeforces.com/images/direct.SvG",
+            "https://codeforces.com/images/encoded%2eSvG",
+            "https://codeforces.com/images/encoded-dot.%53%76%47",
+        ]
+        document = EditorialDocument(
+            contest_id="1700",
+            source_url=SOURCE_URL,
+            root=Node(
+                kind="document",
+                children=[
+                    Node(kind="image", attrs={"src": source, "alt": "diagram"})
+                    for source in sources
+                ],
+            ),
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = localize_editorial_assets(
+                document,
+                image_dir=directory,
+                image_fetcher=lambda _url: (_ for _ in ()).throw(
+                    AssertionError("SVG must not be downloaded")
+                ),
+            )
+
+            self.assertIs(result.status, ContestStatus.READY)
+            assert result.document is not None
+            self.assertEqual(
+                [node.kind for node in result.document.root.children],
+                ["missing_asset", "missing_asset", "missing_asset"],
+            )
+            self.assertEqual(
+                [item.code for item in result.document.diagnostics],
+                [
+                    "editorial-asset-unsupported",
+                    "editorial-asset-unsupported",
+                    "editorial-asset-unsupported",
+                ],
+            )
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_ready_document_has_no_remote_image_source(self):
         source = (
