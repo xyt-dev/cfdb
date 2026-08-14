@@ -43,6 +43,23 @@ class EditorialRenderTests(unittest.TestCase):
         with self.assertRaisesRegex(RenderError, "^invalid-heading-level$"):
             render_editorial_html(document)
 
+    def test_spoiler_title_remote_image_fails_ready_validation(self):
+        document = fixture_document(
+            Node(
+                kind="spoiler",
+                attrs={
+                    "title": [
+                        Node(
+                            kind="image",
+                            attrs={"src": "https://codeforces.com/remote.png", "alt": "remote"},
+                        ).to_dict()
+                    ]
+                },
+            )
+        )
+        with self.assertRaisesRegex(RenderError, "^remote-image-in-ready-document$"):
+            render_editorial_html(document)
+
     def test_escapes_text_and_rejects_unsafe_link(self):
         document = fixture_document(
             Node(kind="paragraph", children=[
@@ -122,6 +139,22 @@ class EditorialRenderTests(unittest.TestCase):
             '<img src="/eimages/1.png" alt="x&quot; &lt;y&gt;">',
         )
         self.assertEqual(sanitize_image_url("/eimages/1.png"), "/eimages/1.png")
+
+    def test_image_sanitizer_allows_only_approved_raster_extensions(self):
+        cases = {
+            "/eimages/a.png": "/eimages/a.png",
+            "/eimages/a.JPG": "/eimages/a.JPG",
+            "/eimages/a.jpeg": "/eimages/a.jpeg",
+            "/eimages/a.GIF": "/eimages/a.GIF",
+            "/eimages/a.webp": "/eimages/a.webp",
+            "/eimages/extensionless": None,
+            "/eimages/file.html": None,
+            "/eimages/file.svg": None,
+            "/eimages/file.bmp": None,
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(sanitize_image_url(value), expected)
 
     def test_image_sanitizer_rejects_remote_non_asset_and_svg_urls(self):
         for value in (
