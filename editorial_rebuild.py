@@ -13,8 +13,8 @@ import uuid
 
 import cfcrawl
 from cfcrawl import EditorialBuildResult, TutorialBatch, build_editorial_document
-from editorial_cache import (
-    ContestStatus,
+from content_cache import (  # pyright: ignore[reportMissingImports]
+    ContentStatus,
     GenerationStore,
     RebuildLock,
     activate_generation,
@@ -85,7 +85,12 @@ class EditorialSource(Protocol):
     def fetch_tutorial_batch(self, contest_id: str, codes: list[str]) -> TutorialBatch:
         raise NotImplementedError
 
-    def localize_assets(self, document: EditorialDocument) -> EditorialBuildResult:
+    def localize_assets(
+        self,
+        document: EditorialDocument,
+        *,
+        asset_root: Path,
+    ) -> EditorialBuildResult:
         raise NotImplementedError
 
 
@@ -115,8 +120,6 @@ def _is_recognized(body: str) -> bool:
 
 
 class _LiveEditorialSource:
-    def __init__(self, *, image_dir: str | None = None) -> None:
-        self.image_dir = image_dir
     def problem_contest_ids(self) -> list[str]:
         return sorted({str(problem["contestId"]) for problem in cfcrawl._load_problems()})
 
@@ -151,8 +154,13 @@ class _LiveEditorialSource:
     def fetch_tutorial_batch(self, contest_id: str, codes: list[str]) -> TutorialBatch:
         return cfcrawl._fetch_problem_tutorial_fragments(contest_id, codes)
 
-    def localize_assets(self, document: EditorialDocument) -> EditorialBuildResult:
-        return cfcrawl.localize_editorial_assets(document, image_dir=self.image_dir)
+    def localize_assets(
+        self,
+        document: EditorialDocument,
+        *,
+        asset_root: Path,
+    ) -> EditorialBuildResult:
+        return cfcrawl.localize_editorial_assets(document, image_dir=os.fspath(asset_root))
 
 
 def _source_or_live(source: EditorialSource | None) -> EditorialSource:
@@ -207,7 +215,7 @@ def _failure(error: str, *receipts: FetchReceipt) -> EditorialBuildResult:
             }
             for item in receipts
         ]
-    return EditorialBuildResult(ContestStatus.TRANSIENT_FAILURE, None, evidence)
+    return EditorialBuildResult(ContentStatus.TRANSIENT_FAILURE, None, evidence)
 
 
 def _collect_tutorial_codes(root: Node) -> list[str]:
@@ -227,6 +235,7 @@ def _build_contest(
     contest_id: str,
     source: EditorialSource,
     *,
+    asset_root: Path,
     delay: float,
     sleep_fn: Callable[[float], None],
 ) -> EditorialBuildResult:
@@ -249,7 +258,7 @@ def _build_contest(
                 _receipt_dict(second, editorial_found=False),
             ],
         }
-        return EditorialBuildResult(ContestStatus.KNOWN_ABSENT, None, evidence)
+        return EditorialBuildResult(ContentStatus.KNOWN_ABSENT, None, evidence)
 
     editorial = source.fetch_editorial_page(source_url)
     if not _receipt_valid(editorial):
@@ -262,7 +271,7 @@ def _build_contest(
         )
     except ParseError as error:
         return EditorialBuildResult(
-            ContestStatus.INVALID_STRUCTURE,
+            ContentStatus.INVALID_STRUCTURE,
             None,
             {"error": str(error), "sourceUrl": source_url},
         )
@@ -276,11 +285,11 @@ def _build_contest(
         source_url,
         editorial.body,
         tutorial_batch,
-        source.localize_assets,
+        lambda document: source.localize_assets(document, asset_root=asset_root),
     )
     evidence = dict(result.evidence)
     evidence.setdefault("sourceUrl", source_url)
-    if result.status is ContestStatus.READY:
+    if result.status is ContentStatus.READY:
         evidence["validatedAt"] = editorial.fetched_at
     return EditorialBuildResult(result.status, result.document, evidence)
 
@@ -302,22 +311,15 @@ def validate_editorial(
 ) -> ValidationReport:
     """Build, render, and structurally validate one editorial without cache mutation."""
     contest_id = str(contest_id)
-    if source is None:
-        with tempfile.TemporaryDirectory(prefix="cfdb-editorial-validation-") as directory:
-            result = _build_contest(
-                contest_id,
-                _LiveEditorialSource(image_dir=directory),
-                delay=DEFAULT_DELAY,
-                sleep_fn=time.sleep,
-            )
-    else:
+    with tempfile.TemporaryDirectory(prefix="cfdb-editorial-validation-") as directory:
         result = _build_contest(
             contest_id,
-            source,
+            source or _LiveEditorialSource(),
+            asset_root=Path(directory),
             delay=DEFAULT_DELAY,
             sleep_fn=time.sleep,
         )
-    if result.status is not ContestStatus.READY or result.document is None:
+    if result.status is not ContentStatus.READY or result.document is None:
         return {
             "ok": False,
             "contestId": contest_id,
@@ -405,7 +407,7 @@ def _persist_result(
     lock: RebuildLock,
 ) -> None:
     document_path = None
-    if result.status is ContestStatus.READY:
+    if result.status is ContentStatus.READY:
         if result.document is None:
             raise ValueError("ready build result lacks a document")
         document_path = store.write_document(result.document, lock=lock)
@@ -516,7 +518,7 @@ def _run_generation(
         for contest_id in expected_contests:
             entry = store.manifest["entries"].get(contest_id)
             status = entry.get("status") if isinstance(entry, dict) else None
-            if status in {ContestStatus.READY.value, ContestStatus.KNOWN_ABSENT.value}:
+            if status in {ContentStatus.READY.value, ContentStatus.KNOWN_ABSENT.value}:
                 if contest_id not in requested:
                     continue
             todo.append(contest_id)
@@ -531,6 +533,7 @@ def _run_generation(
                             source,
                             delay=delay,
                             sleep_fn=sleep_fn,
+                            asset_root=store.path / "assets",
                         ),
                         batch,
                     )
@@ -604,7 +607,7 @@ def update_editorials(
     known_absent = {
         contest_id
         for contest_id, entry in active.manifest["entries"].items()
-        if entry.get("status") == ContestStatus.KNOWN_ABSENT.value
+        if entry.get("status") == ContentStatus.KNOWN_ABSENT.value
     }
     new_contests = set(expected) - set(active.manifest["expectedIds"])
     return _run_generation(

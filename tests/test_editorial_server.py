@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 import cfcrawl
-from editorial_cache import ContestStatus, GenerationStore, activate_generation
+from content_cache import ContentStatus as ContestStatus, GenerationStore, activate_generation  # pyright: ignore[reportMissingImports]
 from editorial_model import EditorialDocument, Node
 from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from server import Handler, build_editorial_payload
@@ -142,9 +142,6 @@ class EditorialServerTests(unittest.TestCase):
             root = Path(directory)
             editorial_directory = root / "editorials"
             cache_root = editorial_directory / "v2"
-            failed_path = root / "failed_editorials.json"
-            failed_path.write_bytes(b'["9999"]\n')
-
             store = self.create_active_generation(
                 cache_root,
                 {"1700": ContestStatus.READY},
@@ -173,23 +170,10 @@ class EditorialServerTests(unittest.TestCase):
                 "html": None,
                 "status": "invalid_structure",
                 "known": False,
-                "error": "finalized generation is not activation-ready",
+                "error": "ready document digest mismatch",
             }
             before_files = snapshot()
-            before_failure_memory = failed_path.read_bytes()
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)), patch.object(
-                cfcrawl,
-                "FAILED_EDITORIALS",
-                str(failed_path),
-            ), patch.object(
-                cfcrawl,
-                "fetch_editorial_md",
-                side_effect=AssertionError("request-time crawl attempted"),
-            ), patch.object(
-                cfcrawl,
-                "_remember_failed_editorial",
-                side_effect=AssertionError("failure memory update attempted"),
-            ):
+            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
                 self.assertEqual(build_editorial_payload("1700", cache_root=cache_root), expected)
                 status, headers, body = self.request("/api/editorial?contestId=1700")
 
@@ -197,7 +181,6 @@ class EditorialServerTests(unittest.TestCase):
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
             self.assertEqual(snapshot(), before_files)
-            self.assertEqual(failed_path.read_bytes(), before_failure_memory)
 
     def test_known_absent_v2_payload_has_null_body(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -236,11 +219,7 @@ class EditorialServerTests(unittest.TestCase):
                 "error": "editorial v2 is not initialized",
             }
 
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)), patch.object(
-                cfcrawl,
-                "read_editorial_md",
-                side_effect=AssertionError("legacy editorial read attempted"),
-            ):
+            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
                 self.assertEqual(
                     build_editorial_payload("1700", cache_root=root / "v2"),
                     expected,
@@ -257,15 +236,14 @@ class EditorialServerTests(unittest.TestCase):
             root = Path(directory)
             editorial_directory = root / "editorials"
             editorial_directory.mkdir()
-            (editorial_directory / "2000.md").write_text("legacy must not leak", encoding="utf-8")
+            (editorial_directory / "2000.md").write_text(
+                "legacy must not leak",
+                encoding="utf-8",
+            )
             cache_root = editorial_directory / "v2"
             self.create_active_generation(cache_root, {"1700": ContestStatus.READY})
 
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)), patch.object(
-                cfcrawl,
-                "read_editorial_md",
-                side_effect=AssertionError("v1 fallback attempted"),
-            ):
+            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
                 status, headers, body = self.request("/api/editorial?contestId=2000")
 
             self.assertEqual(status, 500)
@@ -282,14 +260,11 @@ class EditorialServerTests(unittest.TestCase):
                 },
             )
 
-    def test_payload_read_does_not_change_cache_or_failure_memory(self):
+    def test_payload_read_does_not_change_cache(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             editorial_directory = root / "editorials"
             cache_root = editorial_directory / "v2"
-            editorial_directory.mkdir()
-            failed_path = root / "failed_editorials.json"
-            failed_path.write_bytes(b'["9999"]\n')
             self.create_active_generation(
                 cache_root,
                 {
@@ -309,25 +284,10 @@ class EditorialServerTests(unittest.TestCase):
                 }
 
             before_files = snapshot()
-            before_failure_memory = failed_path.read_bytes()
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)), patch.object(
-                cfcrawl,
-                "FAILED_EDITORIALS",
-                str(failed_path),
-            ), patch.object(
-                cfcrawl,
-                "fetch_editorial_md",
-                side_effect=AssertionError("request-time crawl attempted"),
-            ), patch.object(
-                cfcrawl,
-                "_remember_failed_editorial",
-                side_effect=AssertionError("failure memory update attempted"),
-            ):
-                build_editorial_payload("1700", cache_root=cache_root)
-                build_editorial_payload("9999", cache_root=cache_root)
+            build_editorial_payload("1700", cache_root=cache_root)
+            build_editorial_payload("9999", cache_root=cache_root)
 
             self.assertEqual(snapshot(), before_files)
-            self.assertEqual(failed_path.read_bytes(), before_failure_memory)
 
     def test_invalid_contest_reference_returns_invalid_ref_payload(self):
         expected = {

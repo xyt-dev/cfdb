@@ -180,7 +180,7 @@
         width: 118px; /* 冗余宽度：不受「🎨 Theme/🎨 主题」长度影响 */
       }
 
-      /* 爬取进度条 */
+      /* 后台内容更新进度条 */
       .progress-bar {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -679,7 +679,7 @@
       </div>
 
       <div class="progress-bar" id="progress-bar">
-        <span id="progress-text" data-i18n="preCrawling">Pre-crawling...</span>
+        <span id="progress-text" data-i18n="contentUpdating">Updating content...</span>
         <div class="progress-track">
           <div class="progress-fill" id="progress-fill"></div>
         </div>
@@ -816,7 +816,7 @@
           title: "Codeforces Database — Codeforces Problem Library",
           loading: "Loading...",
           theme: "🎨 Theme",
-          preCrawling: "Pre-crawling...",
+          contentUpdating: "Updating content...",
           reset: "Default",
           resetTitle: "Reset filters",
           ratingMin: "Min Rating",
@@ -848,8 +848,8 @@
           open: "Open ↗",
           solvedBadge: "Solved by me",
           stageMeta: "Refreshing metadata",
-          stageStatements: "Crawling statements",
-          stageEditorials: "Crawling editorials",
+          stageStatements: "Updating statements",
+          stageEditorials: "Updating editorials",
           stageDone: "Done",
           stageError: "Error",
           stageIdle: "Idle",
@@ -860,12 +860,12 @@
           v2NotInitialized:
             "V2 content is not initialized. An explicit rebuild and activation are required.",
           noStatement:
-            "Statement not downloaded yet.\n\nThe server auto-crawls on startup (progress bar on top),\nor run: python3 update.py --statements",
+            "Statement content is unavailable in the active v2 generation.",
           loadFail: "Load failed: ",
           noEditorialKnown:
             "This contest has no public Editorial (official solutions not published).",
           noEditorialUnknown:
-            "No public Editorial for this contest (or crawl failed).\n\nYou can pre-crawl: python3 update.py --editorials",
+            "Editorial content is unavailable in the active v2 generation. Run python3 update.py --editorials to retry an initialized root.",
           editorialFail: "Editorial load failed: ",
           mySolutions: "💻 My Solutions",
           openProblem: "Open on Codeforces",
@@ -889,7 +889,7 @@
           title: "Codeforces Database — Codeforces 题目库",
           loading: "加载中...",
           theme: "🎨 主题",
-          preCrawling: "预爬中...",
+          contentUpdating: "内容更新中...",
           reset: "默认",
           resetTitle: "恢复默认筛选",
           ratingMin: "分数下限",
@@ -921,8 +921,8 @@
           open: "打开 ↗",
           solvedBadge: "已做过（有解题代码）",
           stageMeta: "刷新元数据",
-          stageStatements: "预爬题面",
-          stageEditorials: "预爬题解",
+          stageStatements: "更新题面",
+          stageEditorials: "更新题解",
           stageDone: "完成",
           stageError: "异常",
           stageIdle: "空闲",
@@ -933,11 +933,11 @@
           v2NotInitialized:
             "V2 内容尚未初始化。必须先显式重建并激活代际。",
           noStatement:
-            "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
+            "活动 v2 代际中没有可用题面。",
           loadFail: "加载失败：",
           noEditorialKnown: "该比赛没有公开的 Editorial（官方未发布题解）。",
           noEditorialUnknown:
-            "该比赛没有公开的 Editorial（或尚未爬取成功）。\n\n可以手动预爬：python3 update.py --editorials",
+            "活动 v2 代际中没有可用题解。已初始化时可运行 python3 update.py --editorials 重试。",
           editorialFail: "题解加载失败：",
           mySolutions: "💻 我的解题代码",
           openProblem: "在 Codeforces 打开原题",
@@ -1089,7 +1089,7 @@
         }
       }
 
-      /* ═══ 预爬进度 ═══ */
+      /* ═══ 后台内容更新进度 ═══ */
       const STAGE_CN = {
         meta: "stageMeta",
         statements: "stageStatements",
@@ -1133,7 +1133,7 @@
               ? (s.done / s.total) * 100 + "%"
               : "0%";
           }
-          // 进度推进或爬取结束 → 自动刷新列表标记（节流 10s）
+          // 进度推进或后台更新结束 → 自动刷新列表标记（节流 10s）
           const busy =
             s.stage === "meta" ||
             s.stage === "statements" ||
@@ -1439,7 +1439,7 @@
           });
       }
 
-      /* ═══ CF 官方题解（点击时按需爬取 + 缓存）═══ */
+      /* ═══ CF 官方题解（只读 v2 API）═══ */
       function loadEditorial(reader, seq) {
         fetch(`/api/editorial?contestId=${currentProblem.contestId}`)
           .then((r) => r.json())

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""cfdb 本地服务器：静态页面 + 题目元数据 API + 题面/题解（md 文件读取 + 按需爬取）
-启动时自动后台刷新元数据（update.py）
-"""
+"""Serve static UI, metadata, solutions, and read-only v2 content APIs."""
 import http.server
 import hashlib
 from pathlib import Path
@@ -14,6 +12,11 @@ import threading
 import urllib.parse
 
 import cfcrawl
+from content_asset_policy import (  # pyright: ignore[reportMissingImports]
+    ASSET_CONTENT_TYPES,
+    asset_magic_is_valid,
+    parse_asset_name,
+)
 from content_cache import ContentStatus, load_active_generation  # pyright: ignore[reportMissingImports]
 from editorial_rebuild import update_editorials
 from statement_rebuild import update_statements  # pyright: ignore[reportMissingImports]
@@ -279,31 +282,6 @@ def _build_statement_payload_from_parts(contest_id: str, index: str) -> dict:
     )
 
 
-_ASSET_NAME_RE = re.compile(
-    r"(?P<digest>[0-9a-f]{64})\.(?P<extension>png|jpg|jpeg|gif|webp|pdf)"
-)
-_ASSET_CONTENT_TYPES = {
-    "png": "image/png",
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "gif": "image/gif",
-    "webp": "image/webp",
-    "pdf": "application/pdf",
-}
-
-
-def _asset_magic_is_valid(extension: str, payload: bytes) -> bool:
-    if extension == "png":
-        return payload.startswith(b"\x89PNG\r\n\x1a\n")
-    if extension in {"jpg", "jpeg"}:
-        return payload.startswith(b"\xff\xd8\xff")
-    if extension == "gif":
-        return payload.startswith((b"GIF87a", b"GIF89a"))
-    if extension == "webp":
-        return len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP"
-    return extension == "pdf" and payload.startswith(b"%PDF-")
-
-
 def _read_active_asset(
     content_kind: str,
     raw_name: str,
@@ -311,27 +289,24 @@ def _read_active_asset(
 ) -> tuple[bytes, str, dict[str, str]]:
     if urllib.parse.unquote(raw_name) != raw_name:
         raise ValueError("encoded asset name is not allowed")
-    match = _ASSET_NAME_RE.fullmatch(raw_name)
-    if match is None or Path(raw_name).name != raw_name:
+    identity = parse_asset_name(raw_name, content_kind=content_kind)
+    if identity is None or Path(raw_name).name != raw_name:
         raise ValueError("invalid asset name")
-    extension = match.group("extension")
-    if content_kind == "editorial" and extension == "pdf":
-        raise ValueError("editorial PDF assets are not allowed")
     store = load_active_generation(root)
     if store is None or store.manifest["contentKind"] != content_kind:
         raise FileNotFoundError(raw_name)
-    asset_path = store.path / "assets" / raw_name
+    asset_path = store.path / "assets" / identity.name
     if asset_path.is_symlink() or not asset_path.is_file():
         raise FileNotFoundError(raw_name)
     payload = asset_path.read_bytes()
-    if hashlib.sha256(payload).hexdigest() != match.group("digest"):
+    if hashlib.sha256(payload).hexdigest() != identity.digest:
         raise FileNotFoundError(raw_name)
-    if not _asset_magic_is_valid(extension, payload):
+    if not asset_magic_is_valid(identity.extension, payload):
         raise FileNotFoundError(raw_name)
     headers = {"X-Content-Type-Options": "nosniff"}
-    if extension == "pdf":
+    if identity.extension == "pdf":
         headers["Content-Disposition"] = f'attachment; filename="{raw_name}"'
-    return payload, _ASSET_CONTENT_TYPES[extension], headers
+    return payload, ASSET_CONTENT_TYPES[identity.extension], headers
 
 
 def _payload_http_status(payload: dict) -> int:
@@ -411,7 +386,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             content_kind = "statement" if is_statement else "editorial"
             root = STATEMENT_V2_ROOT if is_statement else EDITORIAL_V2_ROOT
             raw_name = u.path.split("/", 2)[2]
-            if urllib.parse.unquote(raw_name) != raw_name or _ASSET_NAME_RE.fullmatch(raw_name) is None:
+            if urllib.parse.unquote(raw_name) != raw_name or parse_asset_name(raw_name) is None:
                 self._send(400, b"invalid asset name", "text/plain")
             else:
                 try:
@@ -426,23 +401,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         extra_headers=headers,
                         cache_control="public, max-age=31536000, immutable",
                     )
-        elif u.path.startswith("/eimages/") or u.path.startswith("/images/"):
-            # 题面/题解图片（content-type 按扩展名）
-            base = cfcrawl.EDITORIAL_IMAGE_DIR if u.path.startswith("/eimages/") else cfcrawl.IMAGE_DIR
-            rel = u.path.split("/", 2)[2]
-            img_path = os.path.join(base, os.path.basename(rel))
-            ext = os.path.splitext(img_path)[1].lower()
-            ctype = {
-                ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
-            }.get(ext, "application/octet-stream")
-            try:
-                with open(img_path, "rb") as f:
-                    self._send(200, f.read(), ctype)
-            except OSError:
-                self._send(404, b"not found", "text/plain")
         elif u.path.startswith("/vendor/"):
-            # 本地静态资源（marked 等）
+            # 本地静态资源（字体、脚本与界面图片）
             name = os.path.basename(u.path)
             vpath = os.path.join(ROOT, "vendor", name)
             try:
@@ -467,7 +427,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except OSError:
                 self._send(404, b"not found", "text/plain")
         elif u.path == "/api/problems":
-            # hasFile: 题面已预爬 | hasSolution: 已有自己的解题代码
+            # hasFile: 活动 v2 题面已就绪 | hasSolution: 已有自己的解题代码
             cached = _active_ready_ids(STATEMENT_V2_ROOT, "statement")
             solved = set()
             try:

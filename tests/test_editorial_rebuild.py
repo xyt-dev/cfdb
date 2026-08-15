@@ -9,14 +9,15 @@ from unittest.mock import patch
 
 import cfcrawl
 from cfcrawl import EditorialBuildResult, TutorialBatch
-from editorial_cache import (
-    ContestStatus,
+from content_cache import (  # pyright: ignore[reportMissingImports]
+    ContentStatus as ContestStatus,
     GenerationStore,
     activate_generation,
     atomic_write_json,
     load_active_document,
 )
 from editorial_model import EditorialDocument, Node
+import editorial_rebuild
 from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_rebuild import (
     FIXTURE_VERSION,
@@ -155,11 +156,64 @@ class FixtureEditorialSource:
             html_by_code[code] = html.replace(f"{letter}_BODY_SENTINEL", LIVE_1700_SENTINELS[code])
         return TutorialBatch(html_by_code, set(), [])
 
-    def localize_assets(self, document: EditorialDocument) -> EditorialBuildResult:
+    def localize_assets(
+        self,
+        document: EditorialDocument,
+        *,
+        asset_root: Path,
+    ) -> EditorialBuildResult:
         return EditorialBuildResult(ContestStatus.READY, document, {})
 
 
 class EditorialRebuildTests(unittest.TestCase):
+    def test_generation_passes_its_asset_directory_to_editorial_source(self):
+        class RecordingSource(FixtureEditorialSource):
+            def __init__(self):
+                super().__init__(("1700",))
+                self.asset_roots: list[Path] = []
+
+            def localize_assets(
+                self,
+                document: EditorialDocument,
+                *,
+                asset_root: Path,
+            ) -> EditorialBuildResult:
+                self.asset_roots.append(Path(asset_root))
+                return EditorialBuildResult(ContestStatus.READY, document, {})
+
+        source = RecordingSource()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = rebuild_editorials(
+                source=source,
+                cache_root=root,
+                generation_id="with-assets",
+                delay=0,
+                sleep_fn=lambda _: None,
+            )
+
+            self.assertTrue(report["activated"])
+            self.assertEqual(
+                source.asset_roots,
+                [root / "generations" / "with-assets" / "assets"],
+            )
+
+    def test_live_source_forwards_requested_asset_directory(self):
+        document = make_document("1700")
+        result = EditorialBuildResult(ContestStatus.READY, document, {})
+        with tempfile.TemporaryDirectory() as directory:
+            asset_root = Path(directory) / "assets"
+            with patch(
+                "editorial_rebuild.cfcrawl.localize_editorial_assets",
+                return_value=result,
+            ) as localize:
+                actual = editorial_rebuild._LiveEditorialSource().localize_assets(
+                    document,
+                    asset_root=asset_root,
+                )
+
+        self.assertIs(actual, result)
+        localize.assert_called_once_with(document, image_dir=str(asset_root))
     def test_validate_1700_reports_a_through_f_adjacency_without_activation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
@@ -179,15 +233,20 @@ class EditorialRebuildTests(unittest.TestCase):
 
     def test_validate_1700_rejects_extra_problem_section(self):
         class ExtraSectionSource(FixtureEditorialSource):
-            def localize_assets(self, document):
+            def localize_assets(
+                self,
+                document: EditorialDocument,
+                *,
+                asset_root: Path,
+            ) -> EditorialBuildResult:
                 document.root.children.append(
                     Node(
                         kind="problem_section",
-                        attrs={"problemCode": "1700G"},
-                        children=[Node(kind="paragraph", children=[Node(kind="text", text="extra")])],
+                        attrs={"problemCode": "1700Z"},
+                        children=[Node(kind="heading", attrs={"level": 2}, children=[])],
                     )
                 )
-                return super().localize_assets(document)
+                return super().localize_assets(document, asset_root=asset_root)
 
         report = validate_editorial("1700", source=ExtraSectionSource(("1700",)))
         self.assertFalse(report["ok"])
@@ -325,6 +384,60 @@ class EditorialRebuildTests(unittest.TestCase):
             self.assertEqual(successor.manifest["entries"]["9999"]["evidence"]["successfulCheckTimestamps"], TIMES[2:4])
             self.assertEqual(successor.manifest["entries"]["2000"]["status"], "known_absent")
             self.assertEqual(json.loads((root / "current.json").read_text())["generationId"], "successor")
+
+
+    def test_incremental_successor_preserves_image_through_active_reader(self):
+        payload = b"\x89PNG\r\n\x1a\nEDITORIAL_IMAGE"
+        name = hashlib.sha256(payload).hexdigest() + ".png"
+        route = f"/editorial-assets/{name}"
+        document = make_document("1700", "image editorial")
+        document.root.children.append(
+            Node(kind="image", attrs={"src": route, "alt": "diagram"})
+        )
+        document.assets = [route]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "v2"
+            base = GenerationStore.create(
+                root,
+                "image-base",
+                ["1700"],
+                EDITORIAL_CODEC,
+                parser_version=PARSER_VERSION,
+                fixture_version=FIXTURE_VERSION,
+            )
+            asset_directory = base.path / "assets"
+            asset_directory.mkdir()
+            (asset_directory / name).write_bytes(payload)
+            document_path = base.write_document(document)
+            base.set_status(
+                "1700",
+                ContestStatus.READY,
+                evidence={"validatedAt": TIMES[0]},
+                document_path=document_path,
+            )
+            base.write_manifest()
+            activate_generation(root, "image-base")
+
+            report = update_editorials(
+                source=FixtureEditorialSource(("1700",)),
+                cache_root=root,
+                generation_id="image-successor",
+                sleep_fn=lambda _delay: None,
+            )
+            successor = GenerationStore.open(root, "image-successor")
+            seeded = successor.load_document("1700")
+            body, content_type, headers = server._read_active_asset(
+                "editorial",
+                Path(seeded.assets[0]).name,
+                root,
+            )
+
+            self.assertTrue(report["activated"])
+            self.assertEqual(seeded.assets, [route])
+            self.assertEqual(body, payload)
+            self.assertEqual(content_type, "image/png")
+            self.assertEqual(headers, {"X-Content-Type-Options": "nosniff"})
 
     def test_incremental_recrawls_explicitly_requested_ready_contest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -562,14 +675,11 @@ class EditorialRebuildTests(unittest.TestCase):
             directory,
         ), patch("update.update_editorials") as incremental, patch(
             "update.rebuild_editorials"
-        ) as rebuild, patch("update.cfcrawl.fetch_all_editorials") as legacy, contextlib.redirect_stderr(
-            io.StringIO()
-        ):
+        ) as rebuild, contextlib.redirect_stderr(io.StringIO()):
             self.assertNotEqual(update.main(["--editorials"]), 0)
 
         incremental.assert_not_called()
         rebuild.assert_not_called()
-        legacy.assert_not_called()
 
     def test_plain_editorial_update_with_pointer_dispatches_incremental(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(
@@ -609,13 +719,7 @@ class EditorialRebuildTests(unittest.TestCase):
             ), patch("server.subprocess.run") as run, patch(
                 "server.update_statements",
                 create=True,
-            ) as statements, patch("server.update_editorials") as editorials, patch(
-                "server.cfcrawl.fetch_all_statements",
-                side_effect=AssertionError("legacy statement crawl attempted"),
-            ), patch(
-                "server.cfcrawl.fetch_all_editorials",
-                side_effect=AssertionError("legacy editorial crawl attempted"),
-            ):
+            ) as statements, patch("server.update_editorials") as editorials:
                 run.return_value.returncode = 0
                 run.return_value.stdout = b"ok"
                 run.return_value.stderr = b""
@@ -677,13 +781,7 @@ class EditorialRebuildTests(unittest.TestCase):
                         "counts": counts,
                         "activated": True,
                     },
-                ) as editorials, patch(
-                    "server.cfcrawl.fetch_all_statements",
-                    side_effect=AssertionError("legacy statement crawl attempted"),
-                ), patch(
-                    "server.cfcrawl.fetch_all_editorials",
-                    side_effect=AssertionError("legacy editorial crawl attempted"),
-                ):
+                ) as editorials:
                     run.return_value.returncode = 0
                     run.return_value.stdout = b"ok"
                     run.return_value.stderr = b""
@@ -738,13 +836,7 @@ class EditorialRebuildTests(unittest.TestCase):
                     "counts": counts,
                     "activated": True,
                 },
-            ) as editorials, patch(
-                "server.cfcrawl.fetch_all_statements",
-                side_effect=AssertionError("legacy statement crawl attempted"),
-            ), patch(
-                "server.cfcrawl.fetch_all_editorials",
-                side_effect=AssertionError("legacy editorial crawl attempted"),
-            ):
+            ) as editorials:
                 run.return_value.returncode = 0
                 run.return_value.stdout = b"ok"
                 run.return_value.stderr = b""

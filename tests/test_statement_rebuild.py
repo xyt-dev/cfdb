@@ -6,12 +6,14 @@ import tempfile
 
 import cfcrawl
 import update
+import server
 import unittest
 from unittest.mock import patch
 
 from content_assets import AssetFetchResult  # pyright: ignore[reportMissingImports]
 from content_cache import load_active_generation  # pyright: ignore[reportMissingImports]
 from statement_crawl import SourceFetch  # pyright: ignore[reportMissingImports]
+from statement_model import StatementDocument  # pyright: ignore[reportMissingImports]
 
 
 statement_rebuild = import_module("statement_rebuild")
@@ -130,6 +132,64 @@ class StatementRebuildTests(unittest.TestCase):
             self.assertEqual(active.generation_id, "s2")
             self.assertEqual(active.manifest["expectedIds"], ["1700A", "1700B"])
 
+
+    def test_incremental_successor_preserves_pdf_attachment_through_active_reader(self):
+        class PdfStatementSource(FixtureStatementSource):
+            def __init__(self):
+                super().__init__({"1700A": ""})
+
+            def fetch_problem(self, problem_code: str) -> SourceFetch:
+                self.fetches.append(problem_code)
+                return SourceFetch(
+                    source_url="https://codeforces.com/contest/1700/problem/A",
+                    source_kind="pdf",
+                    body=b"%PDF-1.7\nSYNTHETIC_STATEMENT\n",
+                    content_type="application/pdf",
+                )
+
+        initial = PdfStatementSource()
+        successor = FixtureStatementSource(
+            {
+                "1700A": statement_html("1700A", "seeded PDF must remain"),
+                "1700B": statement_html("1700B", "new HTML statement"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rebuild_statements(
+                source=initial,
+                cache_root=root,
+                generation_id="pdf-base",
+                sleep_fn=lambda _delay: None,
+            )
+            report = update_statements(
+                source=successor,
+                cache_root=root,
+                generation_id="pdf-successor",
+                sleep_fn=lambda _delay: None,
+            )
+            active = load_active_generation(root)
+
+            self.assertTrue(report["activated"])
+            self.assertEqual(successor.fetches, ["1700B"])
+            assert active is not None
+            document = active.load_document("1700A")
+            assert isinstance(document, StatementDocument)
+            self.assertEqual(document.source_kind, "pdf")
+            self.assertEqual(len(document.assets), 1)
+            name = Path(document.assets[0]).name
+            payload, content_type, headers = server._read_active_asset(
+                "statement",
+                name,
+                root,
+            )
+            self.assertEqual(payload, b"%PDF-1.7\nSYNTHETIC_STATEMENT\n")
+            self.assertEqual(content_type, "application/pdf")
+            self.assertEqual(
+                headers["Content-Disposition"],
+                f'attachment; filename="{name}"',
+            )
+
     def test_failed_successor_does_not_replace_active_generation(self):
         initial = FixtureStatementSource({"1700A": statement_html("1700A", "A")})
         failing = FixtureStatementSource(
@@ -180,14 +240,11 @@ class StatementRebuildTests(unittest.TestCase):
             directory,
         ), patch("update.update_statements") as incremental, patch(
             "update.rebuild_statements"
-        ) as rebuild, patch("update.main_crawl") as legacy, contextlib.redirect_stderr(
-            io.StringIO()
-        ):
+        ) as rebuild, contextlib.redirect_stderr(io.StringIO()):
             self.assertNotEqual(update.main(["--statements"]), 0)
 
         incremental.assert_not_called()
         rebuild.assert_not_called()
-        legacy.assert_not_called()
 
     def test_explicit_statement_rebuild_dispatches_once(self):
         with patch(

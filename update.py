@@ -114,13 +114,6 @@ def update_metadata() -> int:
     return 0
 
 
-def main_crawl() -> int:
-    """Run the existing full statement pre-crawl."""
-    delay = 0.4
-    print(f"▸ 全量预爬题面（间隔 {delay}s，可 Ctrl+C 中断续跑）...")
-    total, cached, fetched = cfcrawl.fetch_all_statements(delay=delay)
-    print(f"✅ 题面: 共 {total} | 缓存 {cached} | 新爬 {fetched}")
-    return 0
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

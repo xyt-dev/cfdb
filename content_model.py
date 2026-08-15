@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-import re
+from content_asset_policy import asset_identity_from_route  # pyright: ignore[reportMissingImports]
 from typing import Any, Mapping, Protocol
 
 SCHEMA_VERSION = 2
@@ -44,15 +44,6 @@ INLINE_KINDS = {
 }
 NODE_KINDS = BLOCK_KINDS | INLINE_KINDS
 
-_STATEMENT_PDF_ROUTE = re.compile(r"^/statement-assets/[0-9a-f]{64}\.pdf$")
-_EDITORIAL_IMAGE_ROUTE = re.compile(
-    r"^(?:/eimages/[A-Za-z0-9._-]+|/editorial-assets/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp))$",
-    re.IGNORECASE,
-)
-_STATEMENT_IMAGE_ROUTE = re.compile(
-    r"^(?:/images/[A-Za-z0-9._-]+|/statement-assets/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp))$",
-    re.IGNORECASE,
-)
 
 
 @dataclass(slots=True)
@@ -172,8 +163,11 @@ def validate_content_tree(
             )
         if ready and node.kind == "image":
             source = str(node.attrs.get("src", ""))
-            route = _EDITORIAL_IMAGE_ROUTE if content_kind == "editorial" else _STATEMENT_IMAGE_ROUTE
-            if not route.fullmatch(source):
+            if asset_identity_from_route(
+                source,
+                content_kind=content_kind,
+                resource_kind="image",
+            ) is None:
                 errors.append(Diagnostic("error", "remote-image-in-ready-document", source, path))
         if node.kind == "attachment":
             if content_kind != "statement":
@@ -184,7 +178,11 @@ def validate_content_tree(
                     errors.append(Diagnostic("error", "invalid-attachment-media-type", media_type, path))
                 elif ready:
                     href = str(node.attrs.get("href", ""))
-                    if not _STATEMENT_PDF_ROUTE.fullmatch(href):
+                    if asset_identity_from_route(
+                        href,
+                        content_kind=content_kind,
+                        resource_kind="attachment",
+                    ) is None:
                         errors.append(Diagnostic("error", "remote-attachment-in-ready-document", href, path))
         if node.text is not None and not isinstance(node.text, str):
             errors.append(Diagnostic("error", "invalid-node-text", type(node.text).__name__, path))

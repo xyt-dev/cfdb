@@ -1,21 +1,18 @@
-import errno
 import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from cfcrawl import (
-    _fsync_asset_directory,
     EditorialBuildResult,
     TutorialBatch,
     build_editorial_document,
     fetch_editorial_v2,
     localize_editorial_assets,
 )
-from editorial_cache import (
-    ContestStatus,
+from content_cache import (  # pyright: ignore[reportMissingImports]
+    ContentStatus as ContestStatus,
     GenerationStore,
     activate_generation,
     load_active_document,
@@ -207,20 +204,7 @@ class EditorialCrawlerTests(unittest.TestCase):
     def test_inactive_generation_assets_do_not_overwrite_active_asset_bytes(self):
         source_url = "https://codeforces.com/images/shared-slot.png"
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            image_dir = root / "images"
-            cache_root = root / "v2"
-
-            active_result = localize_editorial_assets(
-                document_with_image(source_url),
-                image_dir=str(image_dir),
-                image_fetcher=lambda _url: PNG_MAGIC + b"ACTIVE_IMAGE_A",
-            )
-            self.assertIs(active_result.status, ContestStatus.READY)
-            assert active_result.document is not None
-            active_route = active_result.document.root.children[0].attrs["src"]
-            active_asset = image_dir / Path(active_route).name
-
+            cache_root = Path(directory) / "v2"
             active_store = GenerationStore.create(
                 cache_root,
                 "active",
@@ -229,6 +213,16 @@ class EditorialCrawlerTests(unittest.TestCase):
                 parser_version="parser-1",
                 fixture_version="fixtures-1",
             )
+            active_image_dir = active_store.path / "assets"
+            active_result = localize_editorial_assets(
+                document_with_image(source_url),
+                image_dir=str(active_image_dir),
+                image_fetcher=lambda _url: PNG_MAGIC + b"ACTIVE_IMAGE_A",
+            )
+            self.assertIs(active_result.status, ContestStatus.READY)
+            assert active_result.document is not None
+            active_route = active_result.document.root.children[0].attrs["src"]
+            active_asset = active_image_dir / Path(active_route).name
             active_path = active_store.write_document(active_result.document)
             active_store.set_status(
                 "1700",
@@ -239,15 +233,6 @@ class EditorialCrawlerTests(unittest.TestCase):
             active_store.write_manifest()
             activate_generation(cache_root, "active")
 
-            inactive_result = localize_editorial_assets(
-                document_with_image(source_url),
-                image_dir=str(image_dir),
-                image_fetcher=lambda _url: PNG_MAGIC + b"INACTIVE_IMAGE_B",
-            )
-            self.assertIs(inactive_result.status, ContestStatus.READY)
-            assert inactive_result.document is not None
-            inactive_route = inactive_result.document.root.children[0].attrs["src"]
-            inactive_asset = image_dir / Path(inactive_route).name
             inactive_store = GenerationStore.create(
                 cache_root,
                 "inactive",
@@ -256,6 +241,16 @@ class EditorialCrawlerTests(unittest.TestCase):
                 parser_version="parser-1",
                 fixture_version="fixtures-1",
             )
+            inactive_image_dir = inactive_store.path / "assets"
+            inactive_result = localize_editorial_assets(
+                document_with_image(source_url),
+                image_dir=str(inactive_image_dir),
+                image_fetcher=lambda _url: PNG_MAGIC + b"INACTIVE_IMAGE_B",
+            )
+            self.assertIs(inactive_result.status, ContestStatus.READY)
+            assert inactive_result.document is not None
+            inactive_route = inactive_result.document.root.children[0].attrs["src"]
+            inactive_asset = inactive_image_dir / Path(inactive_route).name
             inactive_path = inactive_store.write_document(inactive_result.document)
             inactive_store.set_status(
                 "1700",
@@ -347,60 +342,6 @@ class EditorialCrawlerTests(unittest.TestCase):
                 [name],
             )
 
-    def test_directory_fsync_ignores_only_explicitly_unsupported_errors(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for error_number in (errno.EINVAL, errno.ENOTSUP):
-                with self.subTest(operation="fsync", errno=error_number):
-                    with patch(
-                        "cfcrawl.os.fsync",
-                        side_effect=OSError(error_number, "unsupported"),
-                    ):
-                        _fsync_asset_directory(directory)
-
-            with patch(
-                "cfcrawl.os.open",
-                side_effect=OSError(errno.ENOTSUP, "unsupported"),
-            ):
-                _fsync_asset_directory(directory)
-
-    def test_directory_open_eacces_propagates_on_posix(self):
-        # POSIX directory handles are supported, so EACCES is a real durability failure.
-        with patch("cfcrawl.os.name", "posix"), patch(
-            "cfcrawl.os.open",
-            side_effect=OSError(errno.EACCES, "permission denied"),
-        ):
-            with self.assertRaises(OSError) as raised:
-                _fsync_asset_directory("/asset-directory")
-
-        self.assertEqual(raised.exception.errno, errno.EACCES)
-
-    def test_directory_open_eacces_is_ignored_only_when_handles_are_unsupported(self):
-        # Windows lacks the POSIX directory-handle contract used by this helper.
-        with patch("cfcrawl.os.name", "nt"), patch(
-            "cfcrawl.os.open",
-            side_effect=OSError(errno.EACCES, "directory handles unsupported"),
-        ):
-            _fsync_asset_directory("C:/asset-directory")
-
-    def test_directory_fsync_propagates_real_durability_errors(self):
-        with tempfile.TemporaryDirectory() as directory:
-            for error_number in (errno.EIO, errno.ENOSPC):
-                with self.subTest(operation="fsync", errno=error_number):
-                    with patch(
-                        "cfcrawl.os.fsync",
-                        side_effect=OSError(error_number, "durability failure"),
-                    ):
-                        with self.assertRaises(OSError) as raised:
-                            _fsync_asset_directory(directory)
-                    self.assertEqual(raised.exception.errno, error_number)
-
-            with patch(
-                "cfcrawl.os.open",
-                side_effect=OSError(errno.EIO, "directory open failure"),
-            ):
-                with self.assertRaises(OSError) as raised:
-                    _fsync_asset_directory(directory)
-            self.assertEqual(raised.exception.errno, errno.EIO)
 
     def test_transient_image_failure_prevents_ready_document(self):
         document = document_with_image("https://codeforces.com/images/diagram.png")

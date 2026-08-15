@@ -122,16 +122,11 @@ class StatementServerTests(unittest.TestCase):
                 "error": "statement v2 is not initialized",
             }
 
-            with patch.object(
-                cfcrawl,
-                "read_statement_md",
-                side_effect=AssertionError("legacy statement read attempted"),
-            ):
-                self.assertEqual(build_statement_payload("1700A", cache_root=root), expected)
-                status, headers, body = self.request(
-                    "/api/statement?contestId=1700&index=A",
-                    statement_root=root,
-                )
+            self.assertEqual(build_statement_payload("1700A", cache_root=root), expected)
+            status, headers, body = self.request(
+                "/api/statement?contestId=1700&index=A",
+                statement_root=root,
+            )
 
             self.assertEqual(status, 503)
             self.assertEqual(headers["Content-Type"], "application/json")

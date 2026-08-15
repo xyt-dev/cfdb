@@ -14,7 +14,11 @@ from typing import Any, Callable, Iterable, Mapping, TypeVar
 import uuid
 from dataclasses import dataclass
 
-from content_model import SCHEMA_VERSION, SemanticDocument, canonical_json
+from content_asset_policy import (  # pyright: ignore[reportMissingImports]
+    asset_identity_from_route,
+    asset_magic_is_valid,
+)
+from content_model import ContentNode, SCHEMA_VERSION, SemanticDocument, canonical_json
 
 
 MANIFEST_SCHEMA = 2
@@ -403,8 +407,6 @@ class GenerationStore:
         store = cls(root, generation_id, manifest, codec)
         if not store._counts_are_valid():
             raise ValueError("manifest counts are inconsistent")
-        if finalized_at is not None and not store.is_activation_ready():
-            raise ValueError("finalized generation is not activation-ready")
         return store
 
     def _expected_ids(self) -> list[str]:
@@ -535,9 +537,66 @@ class GenerationStore:
         self.codec.validate_document(document, ready=True)
         return document
 
+
+    def _validated_document_asset_names(self, document: SemanticDocument) -> list[str]:
+        references: dict[str, tuple[str, str, str]] = {}
+
+        def visit(node: ContentNode) -> None:
+            if node.kind in {"image", "attachment"}:
+                attribute = "src" if node.kind == "image" else "href"
+                route = node.attrs.get(attribute)
+                if not isinstance(route, str):
+                    raise ValueError("ready document asset route is invalid")
+                identity = asset_identity_from_route(
+                    route,
+                    content_kind=document.content_kind,
+                    resource_kind=node.kind,
+                )
+                if identity is None:
+                    raise ValueError("ready document asset route is invalid")
+                references[route] = (
+                    identity.name,
+                    identity.digest,
+                    identity.extension,
+                )
+            if node.kind == "spoiler":
+                title = node.attrs.get("title")
+                if isinstance(title, list):
+                    for value in title:
+                        if isinstance(value, dict):
+                            visit(ContentNode.from_dict(value))
+            for child in node.children:
+                visit(child)
+
+        visit(document.root)
+        if len(document.assets) != len(set(document.assets)):
+            raise ValueError("ready document asset list contains duplicates")
+        if set(document.assets) != set(references):
+            raise ValueError("ready document asset list does not match its references")
+        if not references:
+            return []
+
+        asset_directory = self.path / "assets"
+        if asset_directory.is_symlink() or not asset_directory.is_dir():
+            raise ValueError("ready document asset directory is missing")
+        names: list[str] = []
+        for route in document.assets:
+            name, digest, extension = references[route]
+            asset_path = asset_directory / name
+            if asset_path.is_symlink() or not asset_path.is_file():
+                raise ValueError("ready document asset is missing")
+            payload = asset_path.read_bytes()
+            if hashlib.sha256(payload).hexdigest() != digest:
+                raise ValueError("ready document asset digest mismatch")
+            if not asset_magic_is_valid(extension, payload):
+                raise ValueError("ready document asset magic mismatch")
+            names.append(name)
+        return names
+
     def _ready_entry_is_valid(self, contest_id: str, entry: dict[str, Any]) -> bool:
         try:
-            self._load_ready_document(contest_id, entry)
+            document = self._load_ready_document(contest_id, entry)
+            self._validated_document_asset_names(document)
         except (OSError, ValueError, TypeError, KeyError):
             return False
         return True
@@ -617,11 +676,30 @@ class GenerationStore:
         if active_generation.codec.content_kind != self.codec.content_kind:
             raise ValueError("generations must share a content kind")
         source_entries = active_generation.manifest.get("entries", {})
+        copied_assets: set[str] = set()
         for content_id in self._expected_ids():
             entry = source_entries.get(content_id)
             if not isinstance(entry, dict) or entry.get("status") != ContentStatus.READY.value:
                 continue
-            active_generation._load_ready_document(content_id, entry)
+            document = active_generation._load_ready_document(content_id, entry)
+            asset_names = active_generation._validated_document_asset_names(document)
+            if asset_names:
+                target_asset_directory = self.path / "assets"
+                if target_asset_directory.is_symlink():
+                    raise ValueError("successor asset directory must not be a symlink")
+                if not target_asset_directory.exists():
+                    target_asset_directory.mkdir()
+                    _fsync_directory(self.path)
+                elif not target_asset_directory.is_dir():
+                    raise ValueError("successor asset directory is invalid")
+                for name in asset_names:
+                    if name in copied_assets:
+                        continue
+                    _atomic_link_or_copy(
+                        active_generation.path / "assets" / name,
+                        target_asset_directory / name,
+                    )
+                    copied_assets.add(name)
             source = active_generation.path / active_generation._document_relative_path(content_id)
             target = self.path / self._document_relative_path(content_id)
             _atomic_link_or_copy(source, target)
