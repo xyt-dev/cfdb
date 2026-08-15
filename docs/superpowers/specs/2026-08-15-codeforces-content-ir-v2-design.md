@@ -1,6 +1,6 @@
 # Codeforces Content IR V2-Only Design
 
-**Status:** Approved in chat; pending written review
+**Status:** Approved
 
 **Date:** 2026-08-15
 
