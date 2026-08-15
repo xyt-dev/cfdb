@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from content_model import ContentNode, canonical_json, validate_content_tree
+from content_model import ContentNode, canonical_json, validate_content_tree  # pyright: ignore[reportMissingImports]
 
 
 class ContentModelTests(unittest.TestCase):

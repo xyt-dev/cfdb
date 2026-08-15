@@ -22,7 +22,7 @@ import zlib
 import html2md
 from editorial_cache import ContestStatus
 from editorial_model import Diagnostic, EditorialDocument, Node, validate_document
-from editorial_parser import ParseError, compose_tutorials, parse_blog_html, parse_tutorial_fragment
+from editorial_parser import ParseError, compose_tutorials, parse_blog_html, parse_tutorial_fragment  # pyright: ignore[reportAttributeAccessIssue]
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATEMENT_DIR = os.path.join(ROOT, "statements")
