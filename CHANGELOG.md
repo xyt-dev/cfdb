@@ -8,9 +8,11 @@
 
 - **favicon 与标题 CF 图标**：标签页 favicon 使用本地 CF 图标（`vendor/cf-favicon.png`，零 CDN）；页面顶部标题（h1）前加 CF 图标 22×22
 - **`/vendor/` 图片 content-type**：png/jpg/gif/svg/webp 正确返回（此前 octet-stream 导致 favicon 不显示）
-- **结构化题解 v2**：修复 contest 1700 的题号标题与正文脱离问题；动态 tutorial 仅按完整 problem code 精确组合，保持嵌套 spoiler、列表与官方标题层级；语义树以规范 JSON 保存并渲染为净化 HTML，前端使用最小权限 sandbox。
-- **原子全量重爬与回滚**：完整代际只有在全部比赛达到 `ready` 或 `known_absent` 后才原子激活；保留旧代际与 v1 Markdown，可重新激活上一代际回滚。
-- **只读题解 GET**：`GET /api/editorial` 不再于请求期间抓取或修改缓存；v2 激活后返回净化 HTML，激活前继续兼容旧版 Markdown。
+- **统一 Content IR v2**：题面与题解均转换为带类型的规范 JSON，并确定性渲染为净化 HTML；保留源码顺序、标题层级、列表、表格、引用、spoiler、代码、公式、样例与交互结构。
+- **结构化题面与 PDF 附件**：当前 Codeforces DOM 直接映射为 `StatementDocument`；仅 PDF 的题面保留原始字节，作为 SHA-256 寻址的不可变本地附件，不再提取为 Markdown。
+- **独立原子代际**：题面与题解分别拥有 manifest、活动指针、锁、全量重建、增量后继、激活、回滚和历史；激活前验证文档及其传递资源，后继代际完整保留已就绪资源。
+- **严格 v2-only 只读 API**：题面与题解 GET 均无网络、无写入；未初始化的内容根返回 HTTP 503 `v2_not_initialized`，不存在 Markdown、旧图片路由、请求期爬取或旧版回退。
+- **显式初始化与验证命令**：新增 `--validate-statement`、`--validate-editorial`，首次生成必须分别运行 `--statements --rebuild` 与 `--editorials --rebuild`；服务器启动和普通增量命令不会隐式创建首代。
 
 ### 修复
 
