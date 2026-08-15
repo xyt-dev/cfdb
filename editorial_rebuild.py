@@ -21,7 +21,7 @@ from editorial_cache import (
     load_active_generation,
 )
 from editorial_model import EditorialDocument, Node, canonical_json, validate_document
-from editorial_parser import ParseError, parse_blog_html
+from editorial_parser import ParseError, parse_blog_html  # pyright: ignore[reportAttributeAccessIssue]
 from editorial_render import render_editorial_html
 
 
@@ -380,13 +380,21 @@ def validate_editorial(
     }
 
 
+def _contest_sort_key(contest_id: str) -> tuple[int, str]:
+    try:
+        numeric_id = int(contest_id)
+    except ValueError as error:
+        raise ValueError("invalid contest ID") from error
+    return numeric_id, contest_id
+
+
 def _contest_ids(source: EditorialSource) -> list[str]:
     contests = [str(item) for item in source.problem_contest_ids()]
     if not contests:
         raise ValueError("problem metadata contains no contests")
     if any(not item.isdigit() for item in contests):
         raise ValueError("problem metadata contains an invalid contest ID")
-    return sorted(set(contests), key=lambda item: (int(item), item))
+    return sorted(set(contests), key=_contest_sort_key)
 
 
 def _persist_result(
@@ -586,7 +594,7 @@ def update_editorials(
     metadata_contests = _contest_ids(editorial_source)
     expected = sorted(
         set(active.manifest["expectedContests"]) | set(metadata_contests),
-        key=lambda item: (int(item), item),
+        key=_contest_sort_key,
     )
     requested = {str(item) for item in requested_contests or []}
     if not requested.issubset(expected):

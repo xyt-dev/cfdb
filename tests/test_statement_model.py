@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from content_model import ContentNode
-from statement_model import StatementDocument, validate_statement_document
+from content_model import ContentNode  # pyright: ignore[reportMissingImports]
+from statement_model import StatementDocument, validate_statement_document  # pyright: ignore[reportMissingImports]
 
 
 class StatementModelTests(unittest.TestCase):
