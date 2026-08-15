@@ -554,6 +554,33 @@ def _problem_code_from_heading_link(heading: Node) -> str:
     return match.group(1) + match.group(2)
 
 
+def _source_problem_context(heading: Node) -> tuple[str, int] | None:
+    if heading.kind != "heading":
+        return None
+    links = [child for child in heading.children if child.kind == "link"]
+    if len(links) != 1:
+        return None
+    href = str(links[0].attrs.get("href", ""))
+    try:
+        parsed = urlsplit(href)
+    except ValueError:
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return None
+        if parsed.netloc.lower() not in {"codeforces.com", "www.codeforces.com"}:
+            return None
+    match = re.fullmatch(
+        r"/contest/(\d+)/problem/([A-Za-z][A-Za-z0-9]*)",
+        parsed.path,
+    )
+    if match is None:
+        return None
+    return match.group(1) + match.group(2), int(heading.attrs.get("level", 6))
+
+
 def parse_tutorial_fragment(
     html_text: str,
     *,
@@ -590,20 +617,45 @@ def compose_tutorials(
     seen_slots: set[str] = set()
     diagnostics = list(document.diagnostics)
 
-    def replace(node: Node) -> list[Node]:
+    def replace(
+        node: Node,
+        problem_context: tuple[str, int] | None = None,
+    ) -> list[Node]:
         if node.kind == "tutorial_slot":
             code = str(node.attrs.get("problemCode", ""))
             if code in seen_slots:
                 raise ParseError(f"duplicate-tutorial-slot:{code}")
             seen_slots.add(code)
             if code in remaining:
-                return [copy.deepcopy(remaining.pop(code))]
+                fragment = copy.deepcopy(remaining.pop(code))
+                if (
+                    problem_context is not None
+                    and problem_context[0] == code
+                    and fragment.kind == "problem_section"
+                    and fragment.children
+                    and fragment.children[0].kind == "heading"
+                ):
+                    fragment.children = fragment.children[1:]
+                return [fragment]
             if code in missing:
                 diagnostics.append(Diagnostic("warning", "tutorial-known-absent", code))
                 return []
             return [copy.deepcopy(node)]
         clone = copy.deepcopy(node)
-        clone.children = [replacement for child in node.children for replacement in replace(child)]
+        context = problem_context
+        children: list[Node] = []
+        for child in node.children:
+            child_context = _source_problem_context(child)
+            if child_context is not None:
+                context = child_context
+            elif (
+                child.kind == "heading"
+                and context is not None
+                and int(child.attrs.get("level", 6)) <= context[1]
+            ):
+                context = None
+            children.extend(replace(child, context))
+        clone.children = children
         return [clone]
 
     root = replace(document.root)[0]
