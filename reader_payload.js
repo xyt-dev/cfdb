@@ -2,40 +2,46 @@
 	const api = factory();
 	if (typeof module === "object" && module.exports) module.exports = api;
 	else root.CFDBReaderPayload = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, () => {
+})(typeof globalThis === "undefined" ? this : globalThis, () => {
+	const contentKinds = new Set(["statement", "editorial"]);
+	const nonReadyStatuses = new Set([
+		"known_absent",
+		"v2_not_initialized",
+		"invalid_structure",
+		"invalid_ref",
+	]);
+
 	function normalizeApiPayload(data) {
-		const source = data || {};
-		if (source.format === "html" && typeof source.html === "string") {
-			return {
-				format: "html",
-				body: source.html,
-				url: source.url || null,
-				status: source.status || "ready",
-				known: source.known !== false,
-				schema: source.schema == null ? null : source.schema,
-			};
-		}
-		if (
-			(source.format === "markdown" || (!source.format && source.md)) &&
-			typeof source.md === "string"
-		) {
-			return {
-				format: "markdown",
-				body: source.md,
-				url: source.url || null,
-				status: source.status || "ready",
-				known: source.known !== false,
-				schema: source.schema == null ? null : source.schema,
-			};
-		}
-		return {
-			format: null,
-			body: null,
-			url: source.url || null,
-			status: source.status || "unknown",
+		const source = data && typeof data === "object" ? data : {};
+		if (!contentKinds.has(source.contentKind)) return null;
+		const status = source.status;
+		const common = {
+			contentKind: source.contentKind,
+			url: typeof source.url === "string" ? source.url : null,
+			status,
 			known: source.known === true,
 			schema: source.schema == null ? null : source.schema,
 		};
+		if (
+			status === "ready" &&
+			source.format === "html" &&
+			typeof source.html === "string"
+		) {
+			return {
+				format: "html",
+				...common,
+				body: source.html,
+				known: source.known !== false,
+			};
+		}
+		if (nonReadyStatuses.has(status)) {
+			return {
+				format: null,
+				...common,
+				body: null,
+			};
+		}
+		return null;
 	}
 
 	function prepareSourceUrl(value) {
@@ -61,12 +67,9 @@
 			.replace(/>/g, "&gt;");
 	}
 
-	function prepareBody(payload, markdownRenderer, markdownNormalizer) {
-		if (payload.format === "html") return payload.body;
-		if (payload.format === "markdown") {
-			return markdownNormalizer(markdownRenderer(payload.body));
-		}
-		return null;
+	function prepareBody(payload) {
+		if (!payload || payload.format !== "html") return null;
+		return payload.body;
 	}
 
 	return { normalizeApiPayload, prepareBody, prepareSourceUrl };
