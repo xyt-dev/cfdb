@@ -3,6 +3,9 @@
 启动时自动后台刷新元数据（update.py）
 """
 import http.server
+import hashlib
+from pathlib import Path
+import re
 import json
 import os
 import subprocess
@@ -11,11 +14,14 @@ import threading
 import urllib.parse
 
 import cfcrawl
-from editorial_cache import ContestStatus, GenerationStore, load_active_document
+from content_cache import ContentStatus, load_active_generation  # pyright: ignore[reportMissingImports]
 from editorial_rebuild import update_editorials
 from editorial_render import render_editorial_html
+from statement_render import render_statement_html  # pyright: ignore[reportMissingImports]
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+STATEMENT_V2_ROOT = Path(cfcrawl.STATEMENT_DIR) / "v2"
+EDITORIAL_V2_ROOT = Path(cfcrawl.EDITORIAL_DIR) / "v2"
 try:
     with open(os.path.join(ROOT, "problems.json"), encoding="utf-8") as f:
         PROBLEMS = json.load(f)
@@ -111,9 +117,10 @@ def _valid_contest_id(contest_id: str) -> bool:
     return contest_id.isdigit() and 0 < len(contest_id) <= 6
 
 
-def _editorial_error(status: str, error: str) -> dict:
+def _content_error(content_kind: str, status: str, error: str) -> dict:
     return {
         "format": None,
+        "contentKind": content_kind,
         "html": None,
         "status": status,
         "known": False,
@@ -121,88 +128,225 @@ def _editorial_error(status: str, error: str) -> dict:
     }
 
 
+def _uninitialized(content_kind: str) -> dict:
+    return _content_error(
+        content_kind,
+        "v2_not_initialized",
+        f"{content_kind} v2 is not initialized",
+    )
+
+
+def _build_content_payload(
+    content_id: str,
+    *,
+    content_kind: str,
+    root: Path,
+    renderer,
+    document_validator=None,
+) -> dict:
+    if not (root / "current.json").is_file():
+        return _uninitialized(content_kind)
+    try:
+        store = load_active_generation(root)
+        if store is None:
+            return _uninitialized(content_kind)
+        if store.manifest["contentKind"] != content_kind:
+            return _content_error(
+                content_kind,
+                "invalid_structure",
+                "active generation has the wrong content kind",
+            )
+        entry = store.manifest["entries"].get(content_id)
+        if not isinstance(entry, dict):
+            return _content_error(
+                content_kind,
+                "invalid_structure",
+                f"active manifest missing {content_kind}",
+            )
+        status = entry.get("status")
+        if status == ContentStatus.KNOWN_ABSENT.value:
+            return {
+                "format": None,
+                "contentKind": content_kind,
+                "html": None,
+                "status": "known_absent",
+                "known": True,
+            }
+        if status != ContentStatus.READY.value:
+            return _content_error(
+                content_kind,
+                "invalid_structure",
+                f"active {content_kind} entry is nonterminal",
+            )
+        document = store.load_document(content_id)
+        if document_validator is not None and not document_validator(document):
+            return _content_error(content_kind, "invalid_ref", "invalid ref")
+        html = renderer(document)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
+        return _content_error(content_kind, "invalid_structure", str(error))
+
+    payload = {
+        "format": "html",
+        "contentKind": content_kind,
+        "schema": document.schema,
+        "html": html,
+        "url": getattr(document, "source_url"),
+        "known": True,
+        "status": "ready",
+    }
+    source_kind = getattr(document, "source_kind", None)
+    if source_kind is not None:
+        payload["sourceKind"] = source_kind
+    return payload
+
+
 def build_editorial_payload(contest_id, *, cache_root=None) -> dict:
-    """Read one editorial from the active v2 generation or pre-v2 Markdown."""
+    """Read one editorial from the active immutable v2 generation."""
     contest_id = str(contest_id)
     if not _valid_contest_id(contest_id):
-        return _editorial_error("invalid_ref", "invalid ref")
+        return _content_error("editorial", "invalid_ref", "invalid ref")
+    root = Path(cache_root) if cache_root is not None else EDITORIAL_V2_ROOT
+    return _build_content_payload(
+        contest_id,
+        content_kind="editorial",
+        root=root,
+        renderer=render_editorial_html,
+    )
 
-    root = os.fspath(cache_root) if cache_root is not None else os.path.join(cfcrawl.EDITORIAL_DIR, "v2")
-    pointer_path = os.path.join(root, "current.json")
+
+def build_statement_payload(problem_code, *, cache_root=None) -> dict:
+    """Read one statement from the active immutable v2 generation."""
+    problem_code = str(problem_code)
+    match = re.fullmatch(r"([0-9]{1,6})([A-Za-z0-9]{1,3})", problem_code)
+    if match is None or not _valid_ref(match.group(1), match.group(2)):
+        return _content_error("statement", "invalid_ref", "invalid ref")
+    root = Path(cache_root) if cache_root is not None else STATEMENT_V2_ROOT
+    return _build_content_payload(
+        problem_code,
+        content_kind="statement",
+        root=root,
+        renderer=render_statement_html,
+    )
+
+
+def _build_statement_payload_from_parts(contest_id: str, index: str) -> dict:
+    if not _valid_ref(contest_id, index):
+        return _content_error("statement", "invalid_ref", "invalid ref")
+    return _build_content_payload(
+        f"{contest_id}{index}",
+        content_kind="statement",
+        root=STATEMENT_V2_ROOT,
+        renderer=render_statement_html,
+        document_validator=lambda document: (
+            getattr(document, "contest_id", None) == contest_id
+            and getattr(document, "index", None) == index
+        ),
+    )
+
+
+_ASSET_NAME_RE = re.compile(
+    r"(?P<digest>[0-9a-f]{64})\.(?P<extension>png|jpg|jpeg|gif|webp|pdf)"
+)
+_ASSET_CONTENT_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "pdf": "application/pdf",
+}
+
+
+def _asset_magic_is_valid(extension: str, payload: bytes) -> bool:
+    if extension == "png":
+        return payload.startswith(b"\x89PNG\r\n\x1a\n")
+    if extension in {"jpg", "jpeg"}:
+        return payload.startswith(b"\xff\xd8\xff")
+    if extension == "gif":
+        return payload.startswith((b"GIF87a", b"GIF89a"))
+    if extension == "webp":
+        return len(payload) >= 12 and payload[:4] == b"RIFF" and payload[8:12] == b"WEBP"
+    return extension == "pdf" and payload.startswith(b"%PDF-")
+
+
+def _read_active_asset(
+    content_kind: str,
+    raw_name: str,
+    root: Path,
+) -> tuple[bytes, str, dict[str, str]]:
+    if urllib.parse.unquote(raw_name) != raw_name:
+        raise ValueError("encoded asset name is not allowed")
+    match = _ASSET_NAME_RE.fullmatch(raw_name)
+    if match is None or Path(raw_name).name != raw_name:
+        raise ValueError("invalid asset name")
+    extension = match.group("extension")
+    if content_kind == "editorial" and extension == "pdf":
+        raise ValueError("editorial PDF assets are not allowed")
+    store = load_active_generation(root)
+    if store is None or store.manifest["contentKind"] != content_kind:
+        raise FileNotFoundError(raw_name)
+    asset_path = store.path / "assets" / raw_name
+    if asset_path.is_symlink() or not asset_path.is_file():
+        raise FileNotFoundError(raw_name)
+    payload = asset_path.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != match.group("digest"):
+        raise FileNotFoundError(raw_name)
+    if not _asset_magic_is_valid(extension, payload):
+        raise FileNotFoundError(raw_name)
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if extension == "pdf":
+        headers["Content-Disposition"] = f'attachment; filename="{raw_name}"'
+    return payload, _ASSET_CONTENT_TYPES[extension], headers
+
+
+def _payload_http_status(payload: dict) -> int:
+    status = payload.get("status")
+    if status == "invalid_ref":
+        return 400
+    if status == "v2_not_initialized":
+        return 503
+    if status == "invalid_structure":
+        return 500
+    return 200
+
+
+def _active_ready_ids(root: Path, content_kind: str) -> set[str]:
     try:
-        with open(pointer_path, "rb") as pointer_file:
-            pointer_bytes = pointer_file.read()
-    except FileNotFoundError:
-        md = cfcrawl.read_editorial_md(contest_id)
-        url = cfcrawl.read_editorial_url(contest_id)
-        known = not md and contest_id in cfcrawl._load_failed_editorials()
-        if md and md.startswith("<!-- url:"):
-            newline = md.find("\n")
-            md = md[newline + 1:] if newline >= 0 else ""
-        return {
-            "format": "markdown",
-            "md": md,
-            "url": url,
-            "known": known,
-        }
-    except OSError as error:
-        return _editorial_error("invalid_structure", str(error))
-
-    try:
-        document = None
-        for _ in range(3):
-            document = load_active_document(root, contest_id)
-            with open(pointer_path, "rb") as pointer_file:
-                current_pointer_bytes = pointer_file.read()
-            if current_pointer_bytes == pointer_bytes:
-                break
-            pointer_bytes = current_pointer_bytes
-        else:
-            return _editorial_error("invalid_structure", "active generation changed during read")
-        generation_id = json.loads(pointer_bytes)["generationId"]
-        store = GenerationStore.open(root, generation_id)
-    except (OSError, ValueError, TypeError, KeyError) as error:
-        return _editorial_error("invalid_structure", str(error))
-
-    if document is not None:
-        try:
-            html = render_editorial_html(document)
-        except Exception as error:
-            return _editorial_error("invalid_structure", str(error))
-        return {
-            "format": "html",
-            "schema": document.schema,
-            "html": html,
-            "url": document.source_url,
-            "known": True,
-            "status": "ready",
-        }
-
-    entry = store.manifest["contests"].get(contest_id)
-    if not isinstance(entry, dict):
-        return _editorial_error("invalid_structure", "active manifest missing contest")
-    if entry.get("status") == ContestStatus.KNOWN_ABSENT.value:
-        return {
-            "format": None,
-            "html": None,
-            "status": "known_absent",
-            "known": True,
-        }
-    return _editorial_error("invalid_structure", "active manifest has non-terminal contest")
+        store = load_active_generation(root)
+    except (OSError, ValueError, TypeError, KeyError):
+        return set()
+    if store is None or store.manifest.get("contentKind") != content_kind:
+        return set()
+    return {
+        content_id
+        for content_id, entry in store.manifest["entries"].items()
+        if isinstance(entry, dict)
+        and entry.get("status") == ContentStatus.READY.value
+    }
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # 静默日志
 
-    def _send(self, code, body, ctype, *, allow_opaque_origin=False):
+    def _send(
+        self,
+        code,
+        body,
+        ctype,
+        *,
+        allow_opaque_origin=False,
+        extra_headers=None,
+        cache_control="no-store",
+    ):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        # 开发期禁用缓存：改代码后刷新即生效，避免旧版 JS 残留
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         if allow_opaque_origin and self.headers.get("Origin") == "null":
             self.send_header("Access-Control-Allow-Origin", "null")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -227,6 +371,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self._send(200, f.read(), "text/html; charset=utf-8")
             except OSError:
                 self._send(404, b"not found", "text/plain")
+        elif u.path.startswith("/statement-assets/") or u.path.startswith("/editorial-assets/"):
+            is_statement = u.path.startswith("/statement-assets/")
+            content_kind = "statement" if is_statement else "editorial"
+            root = STATEMENT_V2_ROOT if is_statement else EDITORIAL_V2_ROOT
+            raw_name = u.path.split("/", 2)[2]
+            if urllib.parse.unquote(raw_name) != raw_name or _ASSET_NAME_RE.fullmatch(raw_name) is None:
+                self._send(400, b"invalid asset name", "text/plain")
+            else:
+                try:
+                    body, ctype, headers = _read_active_asset(content_kind, raw_name, root)
+                except (OSError, ValueError, TypeError, KeyError):
+                    self._send(404, b"not found", "text/plain")
+                else:
+                    self._send(
+                        200,
+                        body,
+                        ctype,
+                        extra_headers=headers,
+                        cache_control="public, max-age=31536000, immutable",
+                    )
         elif u.path.startswith("/eimages/") or u.path.startswith("/images/"):
             # 题面/题解图片（content-type 按扩展名）
             base = cfcrawl.EDITORIAL_IMAGE_DIR if u.path.startswith("/eimages/") else cfcrawl.IMAGE_DIR
@@ -269,12 +433,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(404, b"not found", "text/plain")
         elif u.path == "/api/problems":
             # hasFile: 题面已预爬 | hasSolution: 已有自己的解题代码
-            cached = set()
+            cached = _active_ready_ids(STATEMENT_V2_ROOT, "statement")
             solved = set()
-            try:
-                cached = {f[:-3] for f in os.listdir(cfcrawl.STATEMENT_DIR) if f.endswith(".md")}
-            except OSError:
-                pass
             try:
                 for n in os.listdir(cfcrawl.SOLUTION_DIR):
                     solved.add(n.split(".")[0])
@@ -286,23 +446,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif u.path == "/api/statement":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]
-            if not _valid_ref(cid, idx):
-                self._send(400, json.dumps({"md": None, "error": "invalid ref"}).encode(), "application/json")
-            else:
-                md = cfcrawl.read_statement_md(cid, idx)
-                self._send(200, json.dumps({"md": md}).encode(), "application/json")
+            payload = _build_statement_payload_from_parts(cid, idx)
+            self._send(
+                _payload_http_status(payload),
+                json.dumps(payload).encode(),
+                "application/json",
+            )
         elif u.path == "/api/progress":
             self._send(200, json.dumps(crawl_state).encode(), "application/json")
         elif u.path == "/api/editorial":
             q = urllib.parse.parse_qs(u.query)
             cid = q.get("contestId", [""])[0]
-            if not _valid_contest_id(cid):
-                payload = _editorial_error("invalid_ref", "invalid ref")
-                self._send(400, json.dumps(payload).encode(), "application/json")
-            else:
-                payload = build_editorial_payload(cid)
-                code = 500 if payload.get("status") == "invalid_structure" else 200
-                self._send(code, json.dumps(payload).encode(), "application/json")
+            payload = build_editorial_payload(cid)
+            self._send(
+                _payload_http_status(payload),
+                json.dumps(payload).encode(),
+                "application/json",
+            )
         elif u.path == "/api/solution":
             q = urllib.parse.parse_qs(u.query)
             cid, idx = q.get("contestId", [""])[0], q.get("index", [""])[0]
