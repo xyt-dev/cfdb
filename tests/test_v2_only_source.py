@@ -4,10 +4,21 @@ import unittest
 
 
 ROOT = Path(__file__).parents[1]
+FORBIDDEN_PUBLICATION_SYMBOLS = {
+    "GenerationStore",
+    "GenerationReport",
+    "RebuildLock",
+    "activate_generation",
+    "load_active_generation",
+    "load_active_document",
+    "_read_pointer",
+    "_generation_id",
+    "_active_ready_ids",
+    "_read_active_asset",
+}
 FORBIDDEN_CONTENT_SYMBOLS = {
     "FAILED_EDITORIALS",
     "_embed_images",
-    "_flatten_transparent_png",
     "_fsync_asset_directory",
     "_prepare_editorial_asset_payload",
     "_atomic_write_editorial_asset",
@@ -53,6 +64,9 @@ class V2OnlySourceTests(unittest.TestCase):
     def test_v2_source_has_no_legacy_content_symbols(self):
         self.assertEqual(project_identifiers(FORBIDDEN_CONTENT_SYMBOLS), {})
 
+    def test_runtime_has_no_generation_activation_symbols(self):
+        self.assertEqual(project_identifiers(FORBIDDEN_PUBLICATION_SYMBOLS), {})
+
 
     def test_runtime_source_has_no_legacy_modules_routes_or_reader_keys(self):
         paths = [*ROOT.glob("*.py"), ROOT / "index.html", ROOT / "reader_payload.js"]
@@ -63,6 +77,8 @@ class V2OnlySourceTests(unittest.TestCase):
             "/images/",
             "marked.min.js",
             "preCrawling",
+            "current.json",
+            "v2_not_initialized",
         )
         matches = {}
         for path in paths:
@@ -77,6 +93,7 @@ class V2OnlySourceTests(unittest.TestCase):
             "html2md.py",
             "editorial_cache.py",
             "tests/test_legacy_editorial_crawler.py",
+            "tests/test_editorial_cache.py",
         ):
             with self.subTest(path=relative_path):
                 self.assertFalse((ROOT / relative_path).exists())

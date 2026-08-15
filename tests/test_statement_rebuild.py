@@ -1,18 +1,13 @@
 from importlib import import_module
-import contextlib
-import io
 from pathlib import Path
 import tempfile
-
-import cfcrawl
-import update
-import server
 import unittest
 from unittest.mock import patch
 
 from content_assets import AssetFetchResult  # pyright: ignore[reportMissingImports]
-from content_cache import load_active_generation  # pyright: ignore[reportMissingImports]
-from statement_crawl import SourceFetch  # pyright: ignore[reportMissingImports]
+from content_cache import ContentStatus, ContentStore  # pyright: ignore[reportMissingImports]
+from content_codecs import STATEMENT_CODEC  # pyright: ignore[reportMissingImports]
+from statement_crawl import ProblemIdentity, SourceFetch  # pyright: ignore[reportMissingImports]
 from statement_model import StatementDocument  # pyright: ignore[reportMissingImports]
 
 
@@ -22,8 +17,7 @@ update_statements = statement_rebuild.update_statements
 validate_statement = statement_rebuild.validate_statement
 
 
-def statement_html(problem_code: str, text: str) -> str:
-    index = problem_code[len(problem_code.rstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")) :]
+def statement_html(index: str, text: str) -> str:
     return (
         '<div class="problem-statement">'
         '<div class="header"><div class="title">'
@@ -36,24 +30,51 @@ def statement_html(problem_code: str, text: str) -> str:
 
 
 class FixtureStatementSource:
-    def __init__(self, documents: dict[str, str], *, failing: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        documents: dict[tuple[str, str], str | bytes],
+        *,
+        failing: set[str] | None = None,
+        pdf: set[str] | None = None,
+    ) -> None:
         self.documents = dict(documents)
         self.failing = set(failing or ())
+        self.pdf = set(pdf or ())
         self.fetches: list[str] = []
+        self.identities = [
+            ProblemIdentity(contest_id + index, contest_id, index)
+            for contest_id, index in self.documents
+        ]
+
+    def problem_identities(self) -> list[ProblemIdentity]:
+        return list(self.identities)
 
     def problem_codes(self) -> list[str]:
-        return sorted(self.documents)
+        return [item.problem_code for item in self.identities]
 
     def fetch_problem(self, problem_code: str) -> SourceFetch:
         self.fetches.append(problem_code)
         if problem_code in self.failing:
             raise OSError("synthetic fetch failure")
-        contest_id = "".join(character for character in problem_code if character.isdigit())
-        index = problem_code[len(contest_id) :]
+        identity = next(item for item in self.identities if item.problem_code == problem_code)
+        body = self.documents[(identity.contest_id, identity.index)]
+        if problem_code in self.pdf:
+            return SourceFetch(
+                source_url=(
+                    f"https://codeforces.com/contest/{identity.contest_id}/problem/"
+                    f"{identity.index}"
+                ),
+                source_kind="pdf",
+                body=body,
+                content_type="application/pdf",
+            )
         return SourceFetch(
-            source_url=f"https://codeforces.com/contest/{contest_id}/problem/{index}",
+            source_url=(
+                f"https://codeforces.com/contest/{identity.contest_id}/problem/"
+                f"{identity.index}"
+            ),
             source_kind="html",
-            body=self.documents[problem_code],
+            body=str(body),
             content_type="text/html",
         )
 
@@ -62,8 +83,201 @@ class FixtureStatementSource:
 
 
 class StatementRebuildTests(unittest.TestCase):
-    def test_validate_statement_uses_temporary_root_without_activation(self):
-        source = FixtureStatementSource({"1700A": statement_html("1700A", "ok")})
+    def test_first_problem_is_readable_before_later_problem_is_crawled(self):
+        source = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "A body"),
+                ("1700", "B"): statement_html("B", "B body"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "statements"
+
+            def observe_after_first(_delay: float) -> None:
+                store = ContentStore(root, STATEMENT_CODEC)
+                self.assertEqual(store.load_document("1700A").content_id, "1700A")
+                with self.assertRaises(FileNotFoundError):
+                    store.load_document("1700B")
+
+            report = rebuild_statements(
+                source=source,
+                cache_root=root,
+                delay=0,
+                sleep_fn=observe_after_first,
+            )
+
+            self.assertTrue(report["completed"])
+            self.assertEqual(report["attemptedCount"], 2)
+            self.assertEqual(ContentStore(root, STATEMENT_CODEC).ready_ids(), {"1700A", "1700B"})
+            self.assertFalse((root / "current.json").exists())
+            self.assertFalse((root / "generations").exists())
+
+    def test_incremental_update_bootstraps_empty_store(self):
+        source = FixtureStatementSource(
+            {("1700", "A"): statement_html("A", "A body")}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            report = update_statements(
+                source=source,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+
+            self.assertTrue(report["completed"])
+            self.assertEqual(source.fetches, ["1700A"])
+            self.assertEqual(
+                ContentStore(directory, STATEMENT_CODEC).load_document("1700A").content_id,
+                "1700A",
+            )
+
+    def test_incremental_update_skips_valid_document_and_fetches_new_problem(self):
+        initial = FixtureStatementSource(
+            {("1700", "A"): statement_html("A", "A body")}
+        )
+        successor = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "A changed but not requested"),
+                ("1700", "B"): statement_html("B", "B new"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            rebuild_statements(
+                source=initial,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+            report = update_statements(
+                source=successor,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+
+            self.assertTrue(report["completed"])
+            self.assertEqual(successor.fetches, ["1700B"])
+            self.assertEqual(
+                ContentStore(directory, STATEMENT_CODEC).ready_ids(),
+                {"1700A", "1700B"},
+            )
+
+    def test_failed_item_is_recorded_and_retried_without_hiding_ready_items(self):
+        failing = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "A body"),
+                ("1700", "B"): statement_html("B", "B body"),
+            },
+            failing={"1700B"},
+        )
+        recovered = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "A body"),
+                ("1700", "B"): statement_html("B", "B recovered"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            first = update_statements(
+                source=failing,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+            store = ContentStore(directory, STATEMENT_CODEC)
+
+            self.assertFalse(first["completed"])
+            self.assertEqual(store.load_document("1700A").content_id, "1700A")
+            self.assertEqual(store.item_status("1700B")["status"], "transient_failure")
+
+            second = update_statements(
+                source=recovered,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+
+            self.assertTrue(second["completed"])
+            self.assertEqual(recovered.fetches, ["1700B"])
+            self.assertEqual(store.load_document("1700B").content_id, "1700B")
+
+    def test_requested_problem_replaces_only_that_document(self):
+        initial = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "old A"),
+                ("1700", "B"): statement_html("B", "old B"),
+            }
+        )
+        refreshed = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "new A"),
+                ("1700", "B"): statement_html("B", "new B"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            rebuild_statements(
+                source=initial,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+            before_b = ContentStore(directory, STATEMENT_CODEC).document_path("1700B").read_bytes()
+
+            update_statements(
+                source=refreshed,
+                cache_root=directory,
+                requested_problems=["1700A"],
+                sleep_fn=lambda _delay: None,
+            )
+
+            self.assertEqual(refreshed.fetches, ["1700A"])
+            store = ContentStore(directory, STATEMENT_CODEC)
+            self.assertIn(b"new A", store.document_path("1700A").read_bytes())
+            self.assertEqual(store.document_path("1700B").read_bytes(), before_b)
+
+    def test_numeric_index_is_published_from_exact_identity(self):
+        source = FixtureStatementSource(
+            {("921", "01"): statement_html("01", "numeric index")}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            report = update_statements(
+                source=source,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+            document = ContentStore(directory, STATEMENT_CODEC).load_document("92101")
+            assert isinstance(document, StatementDocument)
+
+            self.assertTrue(report["completed"])
+            self.assertEqual(document.contest_id, "921")
+            self.assertEqual(document.index, "01")
+
+    def test_incremental_update_preserves_pdf_attachment(self):
+        payload = b"%PDF-1.7\nSYNTHETIC_STATEMENT\n"
+        initial = FixtureStatementSource({("1700", "A"): payload}, pdf={"1700A"})
+        successor = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "must remain PDF"),
+                ("1700", "B"): statement_html("B", "new HTML"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            rebuild_statements(
+                source=initial,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+            update_statements(
+                source=successor,
+                cache_root=directory,
+                sleep_fn=lambda _delay: None,
+            )
+            store = ContentStore(directory, STATEMENT_CODEC)
+            document = store.load_document("1700A")
+            assert isinstance(document, StatementDocument)
+
+            self.assertIsInstance(document, StatementDocument)
+            self.assertEqual(document.source_kind, "pdf")
+            self.assertEqual(len(document.assets), 1)
+            self.assertTrue((store.assets_path / Path(document.assets[0]).name).is_file())
+
+    def test_validate_statement_uses_temporary_store_only(self):
+        source = FixtureStatementSource(
+            {("1700", "A"): statement_html("A", "ok")}
+        )
         with tempfile.TemporaryDirectory() as directory, patch.object(
             statement_rebuild,
             "DEFAULT_CACHE_ROOT",
@@ -72,204 +286,7 @@ class StatementRebuildTests(unittest.TestCase):
             report = validate_statement("1700A", source=source)
 
             self.assertTrue(report["ok"])
-            self.assertFalse((Path(directory) / "production" / "current.json").exists())
-
-    def test_complete_statement_rebuild_activates_independently(self):
-        source = FixtureStatementSource(
-            {
-                "1700A": statement_html("1700A", "A body"),
-                "1700B": statement_html("1700B", "B body"),
-            }
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory) / "statements"
-            report = rebuild_statements(
-                source=source,
-                cache_root=root,
-                generation_id="s1",
-                sleep_fn=lambda _delay: None,
-            )
-            active = load_active_generation(root)
-
-            self.assertTrue(report["activated"])
-            assert active is not None
-            self.assertEqual(active.generation_id, "s1")
-            self.assertEqual(active.manifest["contentKind"], "statement")
-            self.assertEqual(active.manifest["expectedIds"], ["1700A", "1700B"])
-
-    def test_incremental_statement_update_requires_active_parent(self):
-        source = FixtureStatementSource({"1700A": statement_html("1700A", "A")})
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, "statement v2 is not initialized"):
-                update_statements(source=source, cache_root=directory)
-
-    def test_incremental_successor_seeds_ready_and_fetches_only_new_problem(self):
-        initial = FixtureStatementSource({"1700A": statement_html("1700A", "A")})
-        successor = FixtureStatementSource(
-            {
-                "1700A": statement_html("1700A", "A should stay seeded"),
-                "1700B": statement_html("1700B", "B new"),
-            }
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            rebuild_statements(
-                source=initial,
-                cache_root=directory,
-                generation_id="s1",
-                sleep_fn=lambda _delay: None,
-            )
-            report = update_statements(
-                source=successor,
-                cache_root=directory,
-                generation_id="s2",
-                sleep_fn=lambda _delay: None,
-            )
-            active = load_active_generation(directory)
-
-            self.assertTrue(report["activated"])
-            self.assertEqual(successor.fetches, ["1700B"])
-            assert active is not None
-            self.assertEqual(active.generation_id, "s2")
-            self.assertEqual(active.manifest["expectedIds"], ["1700A", "1700B"])
-
-
-    def test_incremental_successor_preserves_pdf_attachment_through_active_reader(self):
-        class PdfStatementSource(FixtureStatementSource):
-            def __init__(self):
-                super().__init__({"1700A": ""})
-
-            def fetch_problem(self, problem_code: str) -> SourceFetch:
-                self.fetches.append(problem_code)
-                return SourceFetch(
-                    source_url="https://codeforces.com/contest/1700/problem/A",
-                    source_kind="pdf",
-                    body=b"%PDF-1.7\nSYNTHETIC_STATEMENT\n",
-                    content_type="application/pdf",
-                )
-
-        initial = PdfStatementSource()
-        successor = FixtureStatementSource(
-            {
-                "1700A": statement_html("1700A", "seeded PDF must remain"),
-                "1700B": statement_html("1700B", "new HTML statement"),
-            }
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            rebuild_statements(
-                source=initial,
-                cache_root=root,
-                generation_id="pdf-base",
-                sleep_fn=lambda _delay: None,
-            )
-            report = update_statements(
-                source=successor,
-                cache_root=root,
-                generation_id="pdf-successor",
-                sleep_fn=lambda _delay: None,
-            )
-            active = load_active_generation(root)
-
-            self.assertTrue(report["activated"])
-            self.assertEqual(successor.fetches, ["1700B"])
-            assert active is not None
-            document = active.load_document("1700A")
-            assert isinstance(document, StatementDocument)
-            self.assertEqual(document.source_kind, "pdf")
-            self.assertEqual(len(document.assets), 1)
-            name = Path(document.assets[0]).name
-            payload, content_type, headers = server._read_active_asset(
-                "statement",
-                name,
-                root,
-            )
-            self.assertEqual(payload, b"%PDF-1.7\nSYNTHETIC_STATEMENT\n")
-            self.assertEqual(content_type, "application/pdf")
-            self.assertEqual(
-                headers["Content-Disposition"],
-                f'attachment; filename="{name}"',
-            )
-
-    def test_failed_successor_does_not_replace_active_generation(self):
-        initial = FixtureStatementSource({"1700A": statement_html("1700A", "A")})
-        failing = FixtureStatementSource(
-            {
-                "1700A": statement_html("1700A", "A"),
-                "1700B": statement_html("1700B", "B"),
-            },
-            failing={"1700B"},
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            rebuild_statements(
-                source=initial,
-                cache_root=directory,
-                generation_id="s1",
-                sleep_fn=lambda _delay: None,
-            )
-            report = update_statements(
-                source=failing,
-                cache_root=directory,
-                generation_id="s2",
-                sleep_fn=lambda _delay: None,
-            )
-            active = load_active_generation(directory)
-
-            self.assertFalse(report["activated"])
-            assert active is not None
-            self.assertEqual(active.generation_id, "s1")
-
-
-    def test_cli_parses_validate_statement(self):
-        args = update.build_argument_parser().parse_args(
-            ["--validate-statement", "1700A"]
-        )
-        self.assertEqual(args.validate_statement, "1700A")
-
-    def test_cli_validate_statement_dispatches_without_activation(self):
-        with patch(
-            "update.validate_statement",
-            return_value={"ok": True, "problemCode": "1700A"},
-        ) as validate, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(update.main(["--validate-statement", "1700A"]), 0)
-        validate.assert_called_once_with("1700A")
-
-    def test_plain_statement_update_without_pointer_does_not_crawl(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(
-            cfcrawl,
-            "STATEMENT_DIR",
-            directory,
-        ), patch("update.update_statements") as incremental, patch(
-            "update.rebuild_statements"
-        ) as rebuild, contextlib.redirect_stderr(io.StringIO()):
-            self.assertNotEqual(update.main(["--statements"]), 0)
-
-        incremental.assert_not_called()
-        rebuild.assert_not_called()
-
-    def test_explicit_statement_rebuild_dispatches_once(self):
-        with patch(
-            "update.rebuild_statements",
-            return_value={"activated": False},
-        ) as rebuild, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(update.main(["--statements", "--rebuild"]), 1)
-        rebuild.assert_called_once_with()
-
-    def test_plain_statement_update_with_pointer_dispatches_incremental(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(
-            cfcrawl,
-            "STATEMENT_DIR",
-            directory,
-        ):
-            root = Path(directory) / "v2"
-            root.mkdir()
-            (root / "current.json").write_text("{}", encoding="utf-8")
-            with patch(
-                "update.update_statements",
-                return_value={"activated": True},
-            ) as incremental, contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(update.main(["--statements"]), 0)
-
-        incremental.assert_called_once_with()
+            self.assertFalse((Path(directory) / "production").exists())
 
 
 if __name__ == "__main__":

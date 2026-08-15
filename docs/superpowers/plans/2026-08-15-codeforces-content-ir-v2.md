@@ -1,5 +1,7 @@
 # Codeforces Content IR V2-Only Implementation Plan
 
+> **Superseded:** Generation, activation, pointer, rollback, initialization, and data-retention tasks are obsolete. See `../specs/2026-08-15-codeforces-direct-item-publication-design.md` for the implemented architecture.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace both statement and editorial Markdown pipelines with typed IR, independent atomic generations, sanitized HTML APIs, and a v2-only runtime while preserving the original implementation as `v1` and creating dated full snapshot tag `snapshot-2026-08-15`.

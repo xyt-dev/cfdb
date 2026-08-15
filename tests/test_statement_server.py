@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import cfcrawl
-from content_cache import ContentStatus, GenerationStore, activate_generation  # pyright: ignore[reportMissingImports]
+from content_cache import ContentStore  # pyright: ignore[reportMissingImports]
 from content_codecs import STATEMENT_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_model import Node
 from statement_model import StatementDocument
@@ -21,14 +21,12 @@ Handler = server.Handler
 build_statement_payload = server.build_statement_payload
 
 
-def make_statement(problem_code: str = "1700A") -> StatementDocument:
-    split_at = next(
-        index
-        for index, character in enumerate(problem_code)
-        if not character.isdigit()
-    )
-    contest_id = problem_code[:split_at]
-    index = problem_code[split_at:]
+def make_statement(
+    problem_code: str = "1700A",
+    *,
+    contest_id: str = "1700",
+    index: str = "A",
+) -> StatementDocument:
     return StatementDocument(
         problem_code=problem_code,
         contest_id=contest_id,
@@ -46,7 +44,12 @@ def make_statement(problem_code: str = "1700A") -> StatementDocument:
                 Node(
                     kind="section",
                     attrs={"role": "body"},
-                    children=[Node(kind="paragraph", children=[Node(kind="text", text="body")])],
+                    children=[
+                        Node(
+                            kind="paragraph",
+                            children=[Node(kind="text", text="body")],
+                        )
+                    ],
                 ),
             ],
         ),
@@ -54,35 +57,17 @@ def make_statement(problem_code: str = "1700A") -> StatementDocument:
 
 
 class StatementServerTests(unittest.TestCase):
-    def create_active_generation(
+    def publish(
         self,
         root: Path,
         document: StatementDocument,
         *,
         assets: dict[str, bytes] | None = None,
-    ):
-        store = GenerationStore.create(
-            root,
-            "s1",
-            [document.problem_code],
-            STATEMENT_CODEC,
-            "parser-v2",
-            "fixtures-v2",
-        )
-        if assets:
-            assets_path = store.path / "assets"
-            assets_path.mkdir()
-            for name, payload in assets.items():
-                (assets_path / name).write_bytes(payload)
-        document_path = store.write_document(document)
-        store.set_status(
-            document.problem_code,
-            ContentStatus.READY,
-            evidence={"validatedAt": "2026-08-15T00:00:00Z"},
-            document_path=document_path,
-        )
-        store.write_manifest()
-        activate_generation(root, "s1")
+    ) -> ContentStore:
+        store = ContentStore.initialize(root, STATEMENT_CODEC)
+        for name, payload in (assets or {}).items():
+            (store.assets_path / name).write_bytes(payload)
+        store.publish(document)
         return store
 
     def request(self, path: str, *, statement_root: Path):
@@ -108,18 +93,16 @@ class StatementServerTests(unittest.TestCase):
             httpd.server_close()
             thread.join(timeout=5)
 
-    def test_statement_without_pointer_is_503_and_ignores_markdown(self):
+    def test_missing_statement_is_pending_and_request_does_not_initialize_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            legacy = Path(directory) / "1700A.md"
-            legacy.write_text("must not leak", encoding="utf-8")
             expected = {
                 "format": None,
                 "contentKind": "statement",
                 "html": None,
-                "status": "v2_not_initialized",
+                "status": "pending",
                 "known": False,
-                "error": "statement v2 is not initialized",
+                "error": "statement has not been crawled yet",
             }
 
             self.assertEqual(build_statement_payload("1700A", cache_root=root), expected)
@@ -128,16 +111,16 @@ class StatementServerTests(unittest.TestCase):
                 statement_root=root,
             )
 
-            self.assertEqual(status, 503)
+            self.assertEqual(status, 202)
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
-            self.assertNotIn("md", json.loads(body))
+            self.assertFalse(root.exists())
 
-    def test_ready_statement_payload_contains_sanitized_html(self):
+    def test_published_statement_payload_is_immediately_available(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
             document = make_statement()
-            self.create_active_generation(root, document)
+            self.publish(root, document)
 
             payload = build_statement_payload("1700A", cache_root=root)
 
@@ -149,7 +132,7 @@ class StatementServerTests(unittest.TestCase):
             self.assertEqual(payload["url"], document.source_url)
             self.assertIn("A &lt; B", payload["html"])
 
-    def test_pdf_asset_route_is_digest_only_and_nosniff(self):
+    def test_pdf_asset_route_reads_direct_content_addressed_asset(self):
         payload = b"%PDF-1.7\nserver-fixture"
         digest = hashlib.sha256(payload).hexdigest()
         route = f"/statement-assets/{digest}.pdf"
@@ -157,7 +140,7 @@ class StatementServerTests(unittest.TestCase):
         wrong_magic_payload = b"not-a-pdf"
         wrong_magic_name = f"{hashlib.sha256(wrong_magic_payload).hexdigest()}.pdf"
         missing_name = f"{'1' * 64}.pdf"
-        document = make_statement("1000A")
+        document = make_statement("1000A", contest_id="1000", index="A")
         document.source_kind = "pdf"
         document.root.children.append(
             Node(
@@ -172,7 +155,7 @@ class StatementServerTests(unittest.TestCase):
         document.assets = [route]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            self.create_active_generation(
+            self.publish(
                 root,
                 document,
                 assets={
@@ -228,11 +211,10 @@ class StatementServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(json.loads(body)["status"], "invalid_ref")
 
-
-    def test_statement_query_fields_must_match_document_identity(self):
+    def test_query_fields_must_match_document_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            self.create_active_generation(root, make_statement("1700A"))
+            self.publish(root, make_statement("1700A"))
 
             status, _, body = self.request(
                 "/api/statement?contestId=17&index=00A",
@@ -242,14 +224,14 @@ class StatementServerTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(json.loads(body)["status"], "invalid_ref")
 
-    def test_compound_statement_index_preserves_exact_identity(self):
+    def test_numeric_index_preserves_exact_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            document = make_statement("1970A1")
-            self.create_active_generation(root, document)
+            document = make_statement("92101", contest_id="921", index="01")
+            self.publish(root, document)
 
             status, _, body = self.request(
-                "/api/statement?contestId=1970&index=A1",
+                "/api/statement?contestId=921&index=01",
                 statement_root=root,
             )
 
@@ -258,11 +240,11 @@ class StatementServerTests(unittest.TestCase):
         self.assertEqual(payload["status"], "ready")
         self.assertEqual(payload["url"], document.source_url)
 
-    def test_problem_metadata_uses_v2_manifest_not_legacy_markdown(self):
+    def test_problem_metadata_uses_direct_documents_not_legacy_markdown(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             root = base / "v2"
-            self.create_active_generation(root, make_statement("1700A"))
+            self.publish(root, make_statement("1700A"))
             legacy = base / "legacy-statements"
             legacy.mkdir()
             (legacy / "9999A.md").write_text("must be ignored", encoding="utf-8")

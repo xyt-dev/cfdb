@@ -2,7 +2,7 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
-## [Unreleased]
+## [v4.0] - 2026-08-16
 
 ### 新增
 
@@ -10,11 +10,14 @@
 - **`/vendor/` 图片 content-type**：png/jpg/gif/svg/webp 正确返回（此前 octet-stream 导致 favicon 不显示）
 - **统一 Content IR v2**：题面与题解均转换为带类型的规范 JSON，并确定性渲染为净化 HTML；保留源码顺序、标题层级、列表、表格、引用、spoiler、代码、公式、样例与交互结构。
 - **结构化题面与 PDF 附件**：当前 Codeforces DOM 直接映射为 `StatementDocument`；仅 PDF 的题面保留原始字节，作为 SHA-256 寻址的不可变本地附件，不再提取为 Markdown。
-- **独立原子代际**：题面与题解分别拥有 manifest、活动指针、锁、全量重建、增量后继、激活、回滚和历史；激活前验证文档及其传递资源，后继代际完整保留已就绪资源。
-- **严格 v2-only 只读 API**：题面与题解 GET 均无网络、无写入；未初始化的内容根返回 HTTP 503 `v2_not_initialized`，不存在 Markdown、旧图片路由、请求期爬取或旧版回退。
-- **显式初始化与验证命令**：新增 `--validate-statement`、`--validate-editorial`，首次生成必须分别运行 `--statements --rebuild` 与 `--editorials --rebuild`；服务器启动和普通增量命令不会隐式创建首代。
+- **逐项原子发布**：题面按完整 `problemCode`、题解按 `contestId` 独立写入稳定路径；资源先落盘，规范 JSON 最后原子替换，爬好一个即可立即查看，不存在全库发布门槛。
+- **严格 v2-only 只读 API**：题面与题解 GET 均无网络、无写入；单项未爬取时返回 HTTP 202 `pending`，不存在 Markdown、旧图片路由、请求期爬取或旧版回退。
+- **自动空存储启动与验证命令**：服务器启动后并发爬取两个内容根，即使为空也不跳过；普通命令补齐缺失/失败项，`--rebuild` 逐项强制刷新；`--validate-statement` 与 `--validate-editorial` 只使用临时存储。
+- **旧数据清理**：删除旧版题面/题解 Markdown、旧图片树、失败记忆与未完成的旧存储残留；保留 `problems.json`、`solutions/` 与测试 fixture。
 
 ### 修复
+
+- **结构化题面图片与样例回归修复**：恢复共享 v2 资源管线在 SHA-256 命名前把透明 PNG 按 alpha 合成到白底（损坏/不支持的 PNG 保持原字节）；`<pre>` 保留 `<br>` 与 `test-example-line` 换行；样例恢复源 Input/Output 标题；过滤 Codeforces CSS 隐藏的 `input-standard`/`output-standard` 元数据，避免出现 `inputstandard input` / `outputstandard output`。
 
 - **题号标题链路（根本解决）**：① API 动态 tutorial 的 `<h3>题号标题</h3>` 在 ttypography 容器外被转换器丢弃（1004E 等纯占位博客整场无题号标题）→ 补全时从 API html 提取补 `## 题号 - 名称`；② 博客原文标题与补全标题双份（1000 类每题标题重复 + 每题第一个总是 Editorial）→ 替换时去重 + 转换管线末尾**全局去重**兜底（同题号 h2 只留第一个，内容不丢）；③ CF 原文 `spoiler-title` 的 `**Editorial**` 折叠标题（题号标题后第一个元素总是 Editorial）→ 转换时跳过（Solution 折叠保留，正文粗体 Editorial 不误伤）
 - **题号标题格式全覆盖**：链接/粗体/裸文本/h1-h4（`### 1004E - Name`、`### [1004E - Name](<url>)`、`#### 2044A - Easy Problem`）/点号（`1000B. Light It Up`，3+ 位数字 + 大写开头防 `1) Sum` 列表误判）→ 统一转 h2；题面不再转（题目名称唯一 h1 保留，居中大标题不受影响）；editorial 转换补入归一化（此前只加在题面转换，重爬不生效）

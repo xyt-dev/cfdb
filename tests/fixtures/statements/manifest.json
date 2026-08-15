@@ -37,7 +37,7 @@
     },
     {
       "path": "expected.json",
-      "sha256": "425edf4338d1f7f8d9cb71b4d1110459754634de2a15f9387089715bf50cdfd9",
+      "sha256": "a40369873b9f2cbbe4364be6c7a56574b563504cde661d869ed956131b068f75",
       "encoding": "utf-8",
       "newline": "lf",
       "rationale": "semantic-expectations"

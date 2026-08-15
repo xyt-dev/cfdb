@@ -115,6 +115,62 @@ class StatementParserTests(unittest.TestCase):
         input_section = _nodes_with_role(document.root, "input_specification")[0]
         self.assertIn("Входные данные", _plain_text(input_section))
 
+
+    def test_live_preformatted_lines_titles_and_hidden_standard_channels(self):
+        document = parse_statement_html(
+            """
+            <div class="problem-statement">
+              <div class="header">
+                <div class="title">A. Live Shapes</div>
+                <div class="input-file input-standard"><div class="property-title">input</div>standard input</div>
+                <div class="output-file output-standard"><div class="property-title">output</div>standard output</div>
+              </div>
+              <div class="problem-description">
+                <pre>namespace Solution {<br>    operation Solve () : ()<br><br>}</pre>
+              </div>
+              <div class="sample-tests">
+                <div class="section-title">Example</div>
+                <div class="sample-test">
+                  <div class="input">
+                    <div class="title">Input</div>
+                    <pre><div class="test-example-line">7</div><div class="test-example-line">1 1</div><div class="test-example-line">2 3</div></pre>
+                  </div>
+                  <div class="output">
+                    <div class="title">Output</div>
+                    <pre>1<br>12<br>13</pre>
+                  </div>
+                </div>
+              </div>
+            </div>
+            """,
+            problem_code="1700A",
+            contest_id="1700",
+            index="A",
+            source_url="https://codeforces.com/contest/1700/problem/A",
+        )
+
+        roles = _roles(document.root)
+        self.assertNotIn("input_channel", roles)
+        self.assertNotIn("output_channel", roles)
+        code_blocks = [node for node in _walk(document.root) if node.kind == "code_block"]
+        self.assertEqual(
+            [node.text for node in code_blocks],
+            [
+                "namespace Solution {\n    operation Solve () : ()\n\n}",
+                "7\n1 1\n2 3\n",
+                "1\n12\n13",
+            ],
+        )
+
+        sample_input = _nodes_with_role(document.root, "sample_input")[0]
+        sample_output = _nodes_with_role(document.root, "sample_output")[0]
+        self.assertEqual(sample_input.children[0].kind, "heading")
+        self.assertEqual(sample_input.children[0].attrs, {"level": 3})
+        self.assertEqual(_plain_text(sample_input), "Input7\n1 1\n2 3\n")
+        self.assertEqual(sample_output.children[0].kind, "heading")
+        self.assertEqual(sample_output.children[0].attrs, {"level": 3})
+        self.assertEqual(_plain_text(sample_output), "Output1\n12\n13")
+
     def test_interaction_scoring_and_custom_sections_keep_source_order(self):
         document = self.parse_fixture(
             "interaction.html",

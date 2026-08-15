@@ -6,7 +6,8 @@
 	const contentKinds = new Set(["statement", "editorial"]);
 	const nonReadyStatuses = new Set([
 		"known_absent",
-		"v2_not_initialized",
+		"pending",
+		"transient_failure",
 		"invalid_structure",
 		"invalid_ref",
 	]);

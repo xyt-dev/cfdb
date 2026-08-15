@@ -13,9 +13,7 @@ from cfcrawl import (
 )
 from content_cache import (  # pyright: ignore[reportMissingImports]
     ContentStatus as ContestStatus,
-    GenerationStore,
-    activate_generation,
-    load_active_document,
+    ContentStore,
 )
 from editorial_model import EditorialDocument, Node, validate_document
 from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
@@ -201,76 +199,50 @@ class EditorialCrawlerTests(unittest.TestCase):
         self.assertIsNone(result.document)
         self.assertEqual(result.evidence["error"], "problem-code-mismatch:1700A:1700B")
 
-    def test_inactive_generation_assets_do_not_overwrite_active_asset_bytes(self):
+    def test_asset_download_does_not_change_document_until_atomic_publish(self):
         source_url = "https://codeforces.com/images/shared-slot.png"
         with tempfile.TemporaryDirectory() as directory:
             cache_root = Path(directory) / "v2"
-            active_store = GenerationStore.create(
-                cache_root,
-                "active",
-                ["1700"],
-                EDITORIAL_CODEC,
-                parser_version="parser-1",
-                fixture_version="fixtures-1",
-            )
-            active_image_dir = active_store.path / "assets"
-            active_result = localize_editorial_assets(
+            store = ContentStore.initialize(cache_root, EDITORIAL_CODEC)
+            initial_result = localize_editorial_assets(
                 document_with_image(source_url),
-                image_dir=str(active_image_dir),
-                image_fetcher=lambda _url: PNG_MAGIC + b"ACTIVE_IMAGE_A",
+                image_dir=str(store.assets_path),
+                image_fetcher=lambda _url: PNG_MAGIC + b"INITIAL_IMAGE_A",
             )
-            self.assertIs(active_result.status, ContestStatus.READY)
-            assert active_result.document is not None
-            active_route = active_result.document.root.children[0].attrs["src"]
-            active_asset = active_image_dir / Path(active_route).name
-            active_path = active_store.write_document(active_result.document)
-            active_store.set_status(
-                "1700",
-                ContestStatus.READY,
-                evidence={"validatedAt": "2026-08-14T10:00:00Z"},
-                document_path=active_path,
-            )
-            active_store.write_manifest()
-            activate_generation(cache_root, "active")
+            self.assertIs(initial_result.status, ContestStatus.READY)
+            assert initial_result.document is not None
+            initial_route = initial_result.document.root.children[0].attrs["src"]
+            initial_asset = store.assets_path / Path(initial_route).name
+            store.publish(initial_result.document)
 
-            inactive_store = GenerationStore.create(
-                cache_root,
-                "inactive",
-                ["1700", "9999"],
-                EDITORIAL_CODEC,
-                parser_version="parser-1",
-                fixture_version="fixtures-1",
-            )
-            inactive_image_dir = inactive_store.path / "assets"
-            inactive_result = localize_editorial_assets(
+            replacement_result = localize_editorial_assets(
                 document_with_image(source_url),
-                image_dir=str(inactive_image_dir),
-                image_fetcher=lambda _url: PNG_MAGIC + b"INACTIVE_IMAGE_B",
+                image_dir=str(store.assets_path),
+                image_fetcher=lambda _url: PNG_MAGIC + b"REPLACEMENT_IMAGE_B",
             )
-            self.assertIs(inactive_result.status, ContestStatus.READY)
-            assert inactive_result.document is not None
-            inactive_route = inactive_result.document.root.children[0].attrs["src"]
-            inactive_asset = inactive_image_dir / Path(inactive_route).name
-            inactive_path = inactive_store.write_document(inactive_result.document)
-            inactive_store.set_status(
-                "1700",
-                ContestStatus.READY,
-                evidence={"validatedAt": "2026-08-14T10:00:10Z"},
-                document_path=inactive_path,
-            )
-            inactive_store.set_status(
-                "9999",
-                ContestStatus.TRANSIENT_FAILURE,
-                evidence={"error": "keep generation inactive"},
-            )
-            inactive_store.write_manifest()
+            self.assertIs(replacement_result.status, ContestStatus.READY)
+            assert replacement_result.document is not None
+            replacement_route = replacement_result.document.root.children[0].attrs["src"]
+            replacement_asset = store.assets_path / Path(replacement_route).name
 
-            still_active = load_active_document(cache_root, "1700")
-            assert still_active is not None
-            self.assertEqual(still_active.root.children[0].attrs["src"], active_route)
-            self.assertNotEqual(inactive_route, active_route)
-            self.assertEqual(active_asset.read_bytes(), PNG_MAGIC + b"ACTIVE_IMAGE_A")
-            self.assertEqual(inactive_asset.read_bytes(), PNG_MAGIC + b"INACTIVE_IMAGE_B")
+            still_published = store.load_document("1700")
+            self.assertEqual(
+                still_published.root.children[0].attrs["src"],
+                initial_route,
+            )
+            self.assertNotEqual(replacement_route, initial_route)
+            self.assertEqual(initial_asset.read_bytes(), PNG_MAGIC + b"INITIAL_IMAGE_A")
+            self.assertEqual(
+                replacement_asset.read_bytes(),
+                PNG_MAGIC + b"REPLACEMENT_IMAGE_B",
+            )
+
+            store.publish(replacement_result.document)
+            published = store.load_document("1700")
+            self.assertEqual(
+                published.root.children[0].attrs["src"],
+                replacement_route,
+            )
     def test_localize_assets_rewrites_only_after_atomic_download(self):
         document = document_with_image("https://codeforces.com/images/diagram.png")
 

@@ -9,10 +9,7 @@ const {
 } = require("../reader_payload.js");
 
 test("statement and editorial payloads require structured html", () => {
-	assert.equal(
-		normalizeApiPayload({ format: "markdown", md: "legacy" }),
-		null,
-	);
+	assert.equal(normalizeApiPayload({ format: "markdown", md: "legacy" }), null);
 	for (const contentKind of ["statement", "editorial"]) {
 		const payload = normalizeApiPayload({
 			format: "html",
@@ -63,38 +60,31 @@ test("ready HTML requires explicit status and preserves empty bodies", () => {
 	assert.equal(prepareBody(payload), "");
 });
 
-test("browser keeps initialization status explicit and accepts empty ready bodies", () => {
+test("browser keeps pending status explicit and accepts empty ready bodies", () => {
 	const source = fs.readFileSync(
 		path.join(__dirname, "..", "index.html"),
 		"utf8",
 	);
 	assert.equal((source.match(/payload\.body == null/g) || []).length, 2);
 	assert.equal(
-		(
-			source.match(
-				/payload && payload\.status === "v2_not_initialized"/g,
-			) || []
-		).length,
+		(source.match(/payload && payload\.status === "pending"/g) || []).length,
 		2,
 	);
+	assert.equal(source.includes("v2_not_initialized"), false);
 });
 
-test("v2_not_initialized stays distinct", () => {
-	assert.deepEqual(
-		normalizeApiPayload({
-			contentKind: "statement",
-			status: "v2_not_initialized",
-		}),
-		{
+test("pending and transient failures remain typed", () => {
+	for (const status of ["pending", "transient_failure"]) {
+		assert.deepEqual(normalizeApiPayload({ contentKind: "statement", status }), {
 			format: null,
 			contentKind: "statement",
 			body: null,
 			url: null,
-			status: "v2_not_initialized",
+			status,
 			known: false,
 			schema: null,
-		},
-	);
+		});
+	}
 });
 
 test("known absent remains a typed empty payload", () => {
@@ -149,18 +139,13 @@ test("unknown kinds and untyped payloads are rejected", () => {
 		}),
 		null,
 	);
-	assert.equal(
-		normalizeApiPayload({ format: "html", html: "<p>x</p>" }),
-		null,
-	);
+	assert.equal(normalizeApiPayload({ format: "html", html: "<p>x</p>" }), null);
 	assert.equal(normalizeApiPayload({ md: "legacy" }), null);
 });
 
 test("source URLs are strictly validated and escaped for an HTML attribute", () => {
 	assert.equal(
-		prepareSourceUrl(
-			'https://codeforces.com/blog/entry/1?lang=en&note="quoted"',
-		),
+		prepareSourceUrl('https://codeforces.com/blog/entry/1?lang=en&note="quoted"'),
 		"https://codeforces.com/blog/entry/1?lang=en&amp;note=%22quoted%22",
 	);
 	assert.equal(

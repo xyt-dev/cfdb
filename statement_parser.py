@@ -87,6 +87,17 @@ def _source_role(node: SourceNode) -> str | None:
     return None
 
 
+def _preformatted_text(node: SourceNode) -> str:
+    if node.tag == "#text":
+        return node.text
+    if node.tag == "br":
+        return "\n"
+    value = "".join(_preformatted_text(child) for child in node.children)
+    if "test-example-line" in class_tokens(node) and not value.endswith("\n"):
+        value += "\n"
+    return value
+
+
 class _StatementMapper:
     def __init__(self, *, source_url: str, limits: ParseLimits) -> None:
         self.source_url = source_url
@@ -129,6 +140,9 @@ class _StatementMapper:
         result: list[ContentNode] = []
         for child in header.children:
             if child.tag == "#text" and not child.text.strip():
+                continue
+            classes = class_tokens(child)
+            if {"input-standard", "output-standard"} & classes:
                 continue
             role = _source_role(child)
             if role in {
@@ -216,6 +230,9 @@ class _StatementMapper:
         part = self._new_node("section", attrs={"role": role})
         for child in source.children:
             if "title" in class_tokens(child):
+                title = self._new_node("heading", attrs={"level": 3})
+                title.children = self._map_children(child)
+                part.children.append(title)
                 continue
             mapped = self._map_node(child)
             if mapped is not None:
@@ -242,7 +259,7 @@ class _StatementMapper:
 
         classes = class_tokens(source)
         if source.tag == "pre":
-            return self._new_node("code_block", text=text_content(source))
+            return self._new_node("code_block", text=_preformatted_text(source))
         if "tex-span" in classes:
             return self._new_node("math_inline", text=text_content(source))
         if "tex-display" in classes:

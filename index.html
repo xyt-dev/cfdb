@@ -679,7 +679,9 @@
       </div>
 
       <div class="progress-bar" id="progress-bar">
-        <span id="progress-text" data-i18n="contentUpdating">Updating content...</span>
+        <span id="progress-text" data-i18n="contentUpdating"
+          >Updating content...</span
+        >
         <div class="progress-track">
           <div class="progress-fill" id="progress-fill"></div>
         </div>
@@ -848,6 +850,7 @@
           open: "Open ↗",
           solvedBadge: "Solved by me",
           stageMeta: "Refreshing metadata",
+          stageContent: "Crawling content",
           stageStatements: "Updating statements",
           stageEditorials: "Updating editorials",
           stageDone: "Done",
@@ -857,15 +860,14 @@
             "{stage}: {done}/{total} (fetched {fetched}, cached {cached}, failed {failed})",
           detailMeta: "Rating: {r} · Solved: {s} · {tags}",
           readerLoading: "Loading...",
-          v2NotInitialized:
-            "V2 content is not initialized. An explicit rebuild and activation are required.",
-          noStatement:
-            "Statement content is unavailable in the active v2 generation.",
+          contentPending:
+            "This content is being crawled and will appear automatically.",
+          noStatement: "Statement content is unavailable.",
           loadFail: "Load failed: ",
           noEditorialKnown:
             "This contest has no public Editorial (official solutions not published).",
           noEditorialUnknown:
-            "Editorial content is unavailable in the active v2 generation. Run python3 update.py --editorials to retry an initialized root.",
+            "Editorial content is not available yet. The crawler will retry automatically.",
           editorialFail: "Editorial load failed: ",
           mySolutions: "💻 My Solutions",
           openProblem: "Open on Codeforces",
@@ -921,6 +923,7 @@
           open: "打开 ↗",
           solvedBadge: "已做过（有解题代码）",
           stageMeta: "刷新元数据",
+          stageContent: "正在爬取内容",
           stageStatements: "更新题面",
           stageEditorials: "更新题解",
           stageDone: "完成",
@@ -930,14 +933,11 @@
             "{stage}：{done}/{total}（已爬 {fetched}，已有 {cached}，失败 {failed}）",
           detailMeta: "分数: {r} · 解题: {s} · {tags}",
           readerLoading: "加载中...",
-          v2NotInitialized:
-            "V2 内容尚未初始化。必须先显式重建并激活代际。",
-          noStatement:
-            "活动 v2 代际中没有可用题面。",
+          contentPending: "正在爬取该内容，完成后会自动显示。",
+          noStatement: "暂时没有可用题面。",
           loadFail: "加载失败：",
           noEditorialKnown: "该比赛没有公开的 Editorial（官方未发布题解）。",
-          noEditorialUnknown:
-            "活动 v2 代际中没有可用题解。已初始化时可运行 python3 update.py --editorials 重试。",
+          noEditorialUnknown: "暂时没有可用题解，爬虫会自动重试。",
           editorialFail: "题解加载失败：",
           mySolutions: "💻 我的解题代码",
           openProblem: "在 Codeforces 打开原题",
@@ -1092,6 +1092,7 @@
       /* ═══ 后台内容更新进度 ═══ */
       const STAGE_CN = {
         meta: "stageMeta",
+        content: "stageContent",
         statements: "stageStatements",
         editorials: "stageEditorials",
         done: "stageDone",
@@ -1389,6 +1390,13 @@
         $("tab-editorial").classList.toggle("on", tab === "editorial");
         loadTab(tab);
       }
+      function retryPendingContent(tab, seq) {
+        setTimeout(() => {
+          if (seq === loadSeq && currentProblem && currentTab === tab) {
+            loadTab(tab);
+          }
+        }, 2000);
+      }
       function loadTab(tab) {
         if (!currentProblem) return;
         const seq = ++loadSeq; // 本次加载请求的序列号
@@ -1414,13 +1422,15 @@
             reader.replaceChildren();
             const payload = CFDBReaderPayload.normalizeApiPayload(d);
             if (!payload || payload.body == null) {
-              const hint = el(
-                "div",
-                "hint",
-                payload && payload.status === "v2_not_initialized"
-                  ? t("v2NotInitialized")
-                  : t("noStatement"),
-              );
+              let message = t("noStatement");
+              if (payload && payload.status === "pending") {
+                message = t("contentPending");
+                retryPendingContent(tab, seq);
+              } else if (payload && payload.status === "transient_failure") {
+                message = t("contentPending");
+                retryPendingContent(tab, seq);
+              }
+              const hint = el("div", "hint", message);
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
               tabCache[tab] = null;
@@ -1449,8 +1459,12 @@
             const payload = CFDBReaderPayload.normalizeApiPayload(d);
             if (!payload || payload.body == null) {
               let message = t("noEditorialUnknown");
-              if (payload && payload.status === "v2_not_initialized") {
-                message = t("v2NotInitialized");
+              if (payload && payload.status === "pending") {
+                message = t("contentPending");
+                retryPendingContent("editorial", seq);
+              } else if (payload && payload.status === "transient_failure") {
+                message = t("contentPending");
+                retryPendingContent("editorial", seq);
               } else if (payload && payload.known) {
                 message = t("noEditorialKnown");
               }
@@ -1609,7 +1623,6 @@
       const monoStack =
         '"CodeNewRoman Nerd Font Mono", "JetBrains Mono", "Fira Code", Consolas, monospace';
 
-
       function contentFrame(payload) {
         const sourceUrl = CFDBReaderPayload.prepareSourceUrl(
           payload.url || (currentProblem ? currentProblem.url : null),
@@ -1672,7 +1685,7 @@ hr { border:none; border-top:1px solid ${c.border}; margin:18px 0; }
 .hljs-meta, .hljs-selector-class, .hljs-selector-id { color:${c.r2100}; }
 .hljs-params { color:${c.text}; }
 .hljs-deletion { color:${c.accent2}; }
-img { max-width:100%; height:auto; display:block; margin:10px auto; }
+img { max-width:100%; height:auto; display:block; margin:10px auto; background:#fff; }
 .img-missing { color:${c.subtext}; font-size:12px; font-style:italic; opacity:.85; }
 /* ═══ 样例/代码复制按钮 ═══ */
 .copy-wrap { position: relative; }
@@ -1711,6 +1724,9 @@ blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px;
 .cf-sample { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; margin:12px 0; }
 .cf-sample-input, .cf-sample-output {
   min-width:0; border:1px solid ${c.border}; border-radius:8px; background:${c.surface}; padding:10px;
+}
+.cf-sample-input > h3, .cf-sample-output > h3 {
+  margin:0 0 6px; color:${c.accent}; font:700 13px/1.4 ${sansStack};
 }
 .cf-sample-input pre, .cf-sample-output pre { margin:0; border:0; padding:8px; background:transparent; }
 .cf-note, .cf-interaction, .cf-scoring {

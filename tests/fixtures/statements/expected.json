@@ -19,8 +19,8 @@
       "sample_output",
       "note"
     ],
-    "sampleInputText": ["1 2\n", "4 5\n"],
-    "sampleOutputText": ["3\n", "9\n"]
+    "sampleInputText": ["Input1 2\n", "Input4 5\n"],
+    "sampleOutputText": ["Output3\n", "Output9\n"]
   },
   "interaction": {
     "roles": ["title", "time_limit", "memory_limit", "input_channel", "output_channel", "body", "interaction", "scoring", "custom"],

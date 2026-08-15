@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -9,16 +9,13 @@ from pathlib import Path
 import tempfile
 import time
 from typing import Callable, Protocol, TypedDict
-import uuid
 
 import cfcrawl
 from cfcrawl import EditorialBuildResult, TutorialBatch, build_editorial_document
 from content_cache import (  # pyright: ignore[reportMissingImports]
     ContentStatus,
-    GenerationStore,
-    RebuildLock,
-    activate_generation,
-    load_active_generation,
+    ContentStore,
+    ContentWriterLock,
 )
 from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_model import EditorialDocument, Node, canonical_json, validate_document
@@ -30,6 +27,7 @@ PARSER_VERSION = "editorial-parser-v2"
 FIXTURE_VERSION = "editorial-fixtures-v2"
 BATCH_SIZE = 8
 DEFAULT_DELAY = 1.5
+DEFAULT_CACHE_ROOT = Path(__file__).resolve().parent / "editorials" / "v2"
 LIVE_1700_SENTINELS = {
     "1700A": "Let's notice that the optimal path",
     "1700B": "Let X be the number in input",
@@ -38,6 +36,7 @@ LIVE_1700_SENTINELS = {
     "1700E": "We need to find a simple criteria",
     "1700F": "We are asked to find a minimum cost perfect matching",
 }
+ProgressCallback = Callable[[str, ContentStatus, int, int], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,13 +59,6 @@ class ValidationReport(TypedDict):
     unresolvedSlots: list[str]
     validationErrors: list[object]
     canonicalJsonSha256: str | None
-
-
-class GenerationReport(TypedDict):
-    generationId: str
-    counts: dict[str, int]
-    activated: bool
-    finalized: bool
 
 
 class EditorialSource(Protocol):
@@ -96,11 +88,6 @@ class EditorialSource(Protocol):
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-
-
-def _generation_id(prefix: str) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    return f"{prefix}-{stamp}-{uuid.uuid4().hex[:12]}"
 
 
 def _is_recognized(body: str) -> bool:
@@ -163,10 +150,6 @@ class _LiveEditorialSource:
         return cfcrawl.localize_editorial_assets(document, image_dir=os.fspath(asset_root))
 
 
-def _source_or_live(source: EditorialSource | None) -> EditorialSource:
-    return source if source is not None else _LiveEditorialSource()
-
-
 def _valid_timestamp(value: str) -> bool:
     if not isinstance(value, str) or not value.endswith("Z"):
         return False
@@ -182,10 +165,7 @@ def _receipt_valid(receipt: FetchReceipt) -> bool:
         isinstance(receipt, FetchReceipt)
         and _valid_timestamp(receipt.fetched_at)
         and receipt.ok
-        and (
-            receipt.status_code is None
-            or 200 <= receipt.status_code < 300
-        )
+        and (receipt.status_code is None or 200 <= receipt.status_code < 300)
         and not receipt.blocked
         and receipt.recognized
         and bool(receipt.body)
@@ -309,7 +289,7 @@ def validate_editorial(
     *,
     source: EditorialSource | None = None,
 ) -> ValidationReport:
-    """Build, render, and structurally validate one editorial without cache mutation."""
+    """Build, render, and structurally validate one editorial without store mutation."""
     contest_id = str(contest_id)
     with tempfile.TemporaryDirectory(prefix="cfdb-editorial-validation-") as directory:
         result = _build_contest(
@@ -364,8 +344,6 @@ def validate_editorial(
             validation_errors.append({"code": "missing-problem-sentinel", "problemCode": code})
     if unresolved:
         validation_errors.append({"code": "unresolved-tutorial-slots"})
-
-    # Rendering is itself a validation gate; raw source HTML is never returned.
     try:
         render_editorial_html(document)
     except Exception as error:
@@ -401,183 +379,193 @@ def _contest_ids(source: EditorialSource) -> list[str]:
 
 
 def _persist_result(
-    store: GenerationStore,
+    store: ContentStore,
     contest_id: str,
     result: EditorialBuildResult,
-    lock: RebuildLock,
+    lock: ContentWriterLock,
 ) -> None:
-    document_path = None
+    evidence = dict(result.evidence)
+    if not evidence:
+        evidence["error"] = "editorial build produced no evidence"
     if result.status is ContentStatus.READY:
         if result.document is None:
-            raise ValueError("ready build result lacks a document")
-        document_path = store.write_document(result.document, lock=lock)
-    store.set_status(
+            raise ValueError("ready editorial result lacks a document")
+        if result.document.content_id != contest_id:
+            raise ValueError("editorial build returned the wrong contest")
+        store.publish(result.document, lock=lock)
+        return
+    store.record_status(
         contest_id,
         result.status,
-        evidence=result.evidence,
-        document_path=document_path,
+        evidence=evidence,
         lock=lock,
     )
-    store.write_manifest(lock=lock)
 
 
-
-
-def _resumable_generation_id(
-    root: Path,
-    prefix: str,
-    expected_contests: list[str],
-) -> str | None:
-    generations = root / "generations"
-    if not generations.is_dir():
-        return None
-    candidates: list[tuple[str, str]] = []
-    for path in generations.iterdir():
-        if not path.is_dir() or not path.name.startswith(f"{prefix}-"):
+def _requested_contests(
+    store: ContentStore,
+    contest_ids: list[str],
+    *,
+    force: bool,
+    requested_ids: set[str],
+) -> list[str]:
+    expected = set(contest_ids)
+    if not requested_ids.issubset(expected):
+        raise ValueError("requested contest is absent from metadata")
+    ready = store.ready_ids()
+    selected: list[str] = []
+    for contest_id in contest_ids:
+        if force or contest_id in requested_ids:
+            selected.append(contest_id)
             continue
-        store = GenerationStore.open(root, path.name)
-        if (
-            store.manifest["finalizedAt"] is None
-            and store.manifest["parserVersion"] == PARSER_VERSION
-            and store.manifest["expectedIds"] == sorted(expected_contests)
-        ):
-            candidates.append((store.manifest["createdAt"], path.name))
-    return max(candidates)[1] if candidates else None
+        try:
+            marker = store.recorded_status(contest_id)
+        except (OSError, ValueError, TypeError, KeyError):
+            selected.append(contest_id)
+            continue
+        marker_status = marker.get("status") if isinstance(marker, dict) else None
+        if marker_status in {
+            ContentStatus.TRANSIENT_FAILURE.value,
+            ContentStatus.INVALID_STRUCTURE.value,
+        }:
+            selected.append(contest_id)
+            continue
+        if contest_id in ready:
+            continue
+        if marker_status == ContentStatus.KNOWN_ABSENT.value:
+            continue
+        selected.append(contest_id)
+    return selected
 
 
-def _report(store: GenerationStore, activated: bool) -> GenerationReport:
+def _report(
+    store: ContentStore,
+    expected_ids: list[str],
+    results: list[EditorialBuildResult],
+    garbage_collection: dict[str, int],
+) -> dict[str, object]:
+    counts = store.status_counts(expected_ids)
+    published = sum(result.status is ContentStatus.READY for result in results)
+    known_absent = sum(
+        result.status is ContentStatus.KNOWN_ABSENT for result in results
+    )
+    failed = sum(
+        result.status
+        in {ContentStatus.TRANSIENT_FAILURE, ContentStatus.INVALID_STRUCTURE}
+        for result in results
+    )
+    completed = (
+        failed == 0
+        and counts["pending"] == 0
+        and counts[ContentStatus.TRANSIENT_FAILURE.value] == 0
+        and counts[ContentStatus.INVALID_STRUCTURE.value] == 0
+    )
     return {
-        "generationId": store.generation_id,
-        "counts": dict(store.manifest["counts"]),
-        "activated": activated,
-        "finalized": store.manifest["finalizedAt"] is not None,
+        "contentKind": "editorial",
+        "expectedCount": len(expected_ids),
+        "attemptedCount": len(results),
+        "publishedCount": published,
+        "knownAbsentCount": known_absent,
+        "failedCount": failed,
+        "statusCounts": counts,
+        "completed": completed,
+        "assetGc": garbage_collection,
     }
 
 
-def _same_generation_snapshot(
-    current: GenerationStore | None,
-    expected: GenerationStore,
-) -> bool:
-    return (
-        current is not None
-        and current.generation_id == expected.generation_id
-        and current.manifest == expected.manifest
-    )
-
-
-def _run_generation(
+def _crawl_editorials(
     *,
     source: EditorialSource,
     cache_root: str | os.PathLike[str],
-    generation_id: str,
-    expected_contests: list[str],
     delay: float,
     sleep_fn: Callable[[float], None],
-    seed: GenerationStore | None = None,
-    requested_contests: set[str] | None = None,
-    allow_resume: bool = False,
-) -> GenerationReport:
+    force: bool,
+    requested_ids: set[str],
+    progress_callback: ProgressCallback | None,
+) -> dict[str, object]:
+    expected_ids = _contest_ids(source)
     root = Path(cache_root)
-    requested = requested_contests or set()
-    with RebuildLock(root) as lock:
-        if seed is not None:
-            active_snapshot = load_active_generation(root)
-            if not _same_generation_snapshot(active_snapshot, seed):
-                raise RuntimeError("active generation changed before successor creation")
-        generation_path = root / "generations" / generation_id
-        if generation_path.exists():
-            if not allow_resume:
-                raise ValueError(f"incremental generation already exists: {generation_id}")
-            store = GenerationStore.open(root, generation_id)
-            if store.manifest["expectedIds"] != sorted(expected_contests):
-                raise ValueError("resumed generation contest set differs from problem metadata")
-            if store.manifest["parserVersion"] != PARSER_VERSION:
-                raise ValueError("resumed generation parser version differs")
-        else:
-            store = GenerationStore.create(
-                root,
-                generation_id,
-                expected_contests,
-                EDITORIAL_CODEC,
-                parser_version=PARSER_VERSION,
-                fixture_version=FIXTURE_VERSION,
-                lock=lock,
-            )
-            if seed is not None and seed.manifest["parserVersion"] == PARSER_VERSION:
-                store.seed_from(seed, lock=lock)
-                for contest_id in requested:
-                    store.manifest["entries"].pop(contest_id, None)
-
-        if store.manifest["finalizedAt"] is not None:
-            active_snapshot = load_active_generation(root)
-            if active_snapshot is None or active_snapshot.generation_id != generation_id:
-                activate_generation(root, generation_id, lock=lock)
-            return _report(store, True)
-
-        todo = []
-        for contest_id in expected_contests:
-            entry = store.manifest["entries"].get(contest_id)
-            status = entry.get("status") if isinstance(entry, dict) else None
-            if status in {ContentStatus.READY.value, ContentStatus.KNOWN_ABSENT.value}:
-                if contest_id not in requested:
-                    continue
-            todo.append(contest_id)
-
+    with ContentWriterLock(root) as lock:
+        store = ContentStore.initialize(root, EDITORIAL_CODEC, lock=lock)
+        todo = _requested_contests(
+            store,
+            expected_ids,
+            force=force,
+            requested_ids=requested_ids,
+        )
+        results: list[EditorialBuildResult] = []
+        completed_count = 0
         for offset in range(0, len(todo), BATCH_SIZE):
             batch = todo[offset:offset + BATCH_SIZE]
-            with ThreadPoolExecutor(max_workers=BATCH_SIZE) as executor:
-                results = list(
-                    executor.map(
-                        lambda contest_id: _build_contest(
+            with ThreadPoolExecutor(max_workers=max(1, len(batch))) as executor:
+                futures = {
+                    executor.submit(
+                        _build_contest,
+                        contest_id,
+                        source,
+                        asset_root=store.assets_path,
+                        delay=delay,
+                        sleep_fn=sleep_fn,
+                    ): contest_id
+                    for contest_id in batch
+                }
+                for future in as_completed(futures):
+                    contest_id = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as error:
+                        result = EditorialBuildResult(
+                            ContentStatus.TRANSIENT_FAILURE,
+                            None,
+                            {"errors": [f"contest-build-failed:{error}"]},
+                        )
+                    try:
+                        _persist_result(store, contest_id, result, lock)
+                    except (OSError, ValueError, TypeError, KeyError) as error:
+                        result = EditorialBuildResult(
+                            ContentStatus.INVALID_STRUCTURE,
+                            None,
+                            {"error": f"publication-failed:{error}"},
+                        )
+                        store.record_status(
                             contest_id,
-                            source,
-                            delay=delay,
-                            sleep_fn=sleep_fn,
-                            asset_root=store.path / "assets",
-                        ),
-                        batch,
-                    )
-                )
-            for contest_id, result in zip(batch, results):
-                _persist_result(store, contest_id, result, lock)
+                            result.status,
+                            evidence=result.evidence,
+                            lock=lock,
+                        )
+                    results.append(result)
+                    completed_count += 1
+                    if progress_callback is not None:
+                        progress_callback(
+                            contest_id,
+                            result.status,
+                            completed_count,
+                            len(todo),
+                        )
             if offset + BATCH_SIZE < len(todo):
                 sleep_fn(delay)
-        if not todo:
-            store.write_manifest(lock=lock)
-
-        store = GenerationStore.open(root, generation_id)
-        activated = False
-        if store.manifest["finalizedAt"] is not None and store.is_activation_ready():
-            if seed is not None:
-                active_snapshot = load_active_generation(root)
-                if not _same_generation_snapshot(active_snapshot, seed):
-                    raise RuntimeError("active generation changed before successor activation")
-            activate_generation(root, generation_id, lock=lock)
-            activated = True
-        return _report(store, activated)
+        garbage_collection = store.garbage_collect_assets(lock=lock)
+        return _report(store, expected_ids, results, garbage_collection)
 
 
 def rebuild_editorials(
     *,
     source: EditorialSource | None = None,
     cache_root: str | os.PathLike[str] | None = None,
-    generation_id: str | None = None,
     delay: float = DEFAULT_DELAY,
     sleep_fn: Callable[[float], None] = time.sleep,
-) -> GenerationReport:
-    """Create or resume a full inactive v2 generation and activate only if terminal."""
-    editorial_source = _source_or_live(source)
-    root = Path(cache_root) if cache_root is not None else Path(cfcrawl.EDITORIAL_DIR) / "v2"
-    expected = _contest_ids(editorial_source)
-    selected_generation = generation_id or _resumable_generation_id(root, "full", expected)
-    return _run_generation(
-        source=editorial_source,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, object]:
+    active_source = source or _LiveEditorialSource()
+    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
+    return _crawl_editorials(
+        source=active_source,
         cache_root=root,
-        generation_id=selected_generation or _generation_id("full"),
-        expected_contests=expected,
         delay=delay,
         sleep_fn=sleep_fn,
-        allow_resume=True,
+        force=True,
+        requested_ids=set(),
+        progress_callback=progress_callback,
     )
 
 
@@ -585,38 +573,33 @@ def update_editorials(
     *,
     source: EditorialSource | None = None,
     cache_root: str | os.PathLike[str] | None = None,
-    generation_id: str | None = None,
     requested_contests: list[str] | None = None,
     delay: float = DEFAULT_DELAY,
     sleep_fn: Callable[[float], None] = time.sleep,
-) -> GenerationReport:
-    """Build an incremental successor without mutating the active generation."""
-    editorial_source = _source_or_live(source)
-    root = Path(cache_root) if cache_root is not None else Path(cfcrawl.EDITORIAL_DIR) / "v2"
-    active = load_active_generation(root)
-    if active is None:
-        raise RuntimeError("incremental editorial update requires an active v2 generation")
-    metadata_contests = _contest_ids(editorial_source)
-    expected = sorted(
-        set(active.manifest["expectedIds"]) | set(metadata_contests),
-        key=_contest_sort_key,
-    )
-    requested = {str(item) for item in requested_contests or []}
-    if not requested.issubset(expected):
-        raise ValueError("requested contest is absent from problem metadata and active generation")
-    known_absent = {
-        contest_id
-        for contest_id, entry in active.manifest["entries"].items()
-        if entry.get("status") == ContentStatus.KNOWN_ABSENT.value
-    }
-    new_contests = set(expected) - set(active.manifest["expectedIds"])
-    return _run_generation(
-        source=editorial_source,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, object]:
+    active_source = source or _LiveEditorialSource()
+    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
+    requested = {str(contest_id) for contest_id in requested_contests or ()}
+    return _crawl_editorials(
+        source=active_source,
         cache_root=root,
-        generation_id=generation_id or _generation_id("update"),
-        expected_contests=expected,
         delay=delay,
         sleep_fn=sleep_fn,
-        seed=active,
-        requested_contests=requested | known_absent | new_contests,
+        force=False,
+        requested_ids=requested,
+        progress_callback=progress_callback,
     )
+
+
+__all__ = [
+    "BATCH_SIZE",
+    "DEFAULT_CACHE_ROOT",
+    "FIXTURE_VERSION",
+    "FetchReceipt",
+    "LIVE_1700_SENTINELS",
+    "PARSER_VERSION",
+    "rebuild_editorials",
+    "update_editorials",
+    "validate_editorial",
+]

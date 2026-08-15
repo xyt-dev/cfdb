@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol, cast
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -23,8 +23,8 @@ _MAX_LIVE_BYTES = 20 * 1024 * 1024
 _USER_AGENT = "cfdb-content-ir-v2"
 _PROBLEM_CODE_RE = re.compile(r"^(\d+)([A-Za-z][A-Za-z0-9]*)$")
 _SOURCE_PATHS = (
-    re.compile(r"^/contest/(\d+)/problem/([A-Za-z][A-Za-z0-9]*)/?$"),
-    re.compile(r"^/problemset/problem/(\d+)/([A-Za-z][A-Za-z0-9]*)/?$"),
+    re.compile(r"^/contest/(\d+)/problem/([A-Za-z0-9]+)/?$"),
+    re.compile(r"^/problemset/problem/(\d+)/([A-Za-z0-9]+)/?$"),
 )
 
 
@@ -71,6 +71,35 @@ def _problem_identity(problem_code: str) -> ProblemIdentity:
         raise ValueError("invalid-problem-code")
     contest_id, index = match.groups()
     return ProblemIdentity(contest_id + index, contest_id, index)
+
+
+def _validate_problem_identity(problem: ProblemIdentity) -> ProblemIdentity:
+    contest_id = str(problem.contest_id)
+    index = str(problem.index)
+    problem_code = str(problem.problem_code)
+    if (
+        not contest_id.isdigit()
+        or not index
+        or not index.isalnum()
+        or problem_code != contest_id + index
+    ):
+        raise ValueError("invalid-problem-identity")
+    return ProblemIdentity(problem_code, contest_id, index)
+
+
+def source_problem_identities(source: StatementSource) -> list[ProblemIdentity]:
+    identity_loader = getattr(source, "problem_identities", None)
+    if callable(identity_loader):
+        load_identities = cast(Callable[[], list[ProblemIdentity]], identity_loader)
+        identities = [_validate_problem_identity(item) for item in load_identities()]
+    else:
+        identities = [_problem_identity(str(code)) for code in source.problem_codes()]
+    codes = [item.problem_code for item in identities]
+    if not codes:
+        raise ValueError("problem metadata contains no statement identities")
+    if len(codes) != len(set(codes)):
+        raise ValueError("problem metadata contains duplicate statement identities")
+    return identities
 
 
 def _source_identity(source_url: str) -> str:
@@ -192,23 +221,44 @@ def fetch_statement_v2(
     *,
     source: StatementSource | None = None,
     asset_root: str | Path | None = None,
+    identity: ProblemIdentity | None = None,
 ) -> StatementBuildResult:
     active_source = source or LiveStatementSource()
-    try:
-        problem = _problem_identity(problem_code)
-        known_codes = {str(code) for code in active_source.problem_codes()}
-    except Exception as error:
-        return StatementBuildResult(
-            ContentStatus.TRANSIENT_FAILURE,
-            None,
-            {"error": f"metadata-unavailable:{error}"},
-        )
-    if problem.problem_code not in known_codes:
-        return StatementBuildResult(
-            ContentStatus.KNOWN_ABSENT,
-            None,
-            {"problemCode": problem.problem_code, "recognized": False},
-        )
+    requested_code = str(problem_code)
+    if identity is not None:
+        try:
+            problem = _validate_problem_identity(identity)
+        except ValueError as error:
+            return StatementBuildResult(
+                ContentStatus.INVALID_STRUCTURE,
+                None,
+                {"error": str(error)},
+            )
+        if problem.problem_code != requested_code:
+            return StatementBuildResult(
+                ContentStatus.INVALID_STRUCTURE,
+                None,
+                {"error": "problem-identity-mismatch"},
+            )
+    else:
+        try:
+            identities = {
+                item.problem_code: item
+                for item in source_problem_identities(active_source)
+            }
+        except Exception as error:
+            return StatementBuildResult(
+                ContentStatus.TRANSIENT_FAILURE,
+                None,
+                {"error": f"metadata-unavailable:{error}"},
+            )
+        problem = identities.get(requested_code)
+        if problem is None:
+            return StatementBuildResult(
+                ContentStatus.KNOWN_ABSENT,
+                None,
+                {"problemCode": requested_code, "recognized": False},
+            )
     if asset_root is None:
         return StatementBuildResult(
             ContentStatus.INVALID_STRUCTURE,
@@ -259,22 +309,42 @@ class LiveStatementSource:
     def __init__(self, *, timeout: float = 30.0, max_bytes: int = _MAX_LIVE_BYTES) -> None:
         self.timeout = timeout
         self.max_bytes = max_bytes
+        self._problem_identities: tuple[ProblemIdentity, ...] | None = None
 
-    def problem_codes(self) -> list[str]:
+    def problem_identities(self) -> list[ProblemIdentity]:
         from cfcrawl import _load_problems
 
-        result: list[str] = []
-        for problem in _load_problems():
-            if not isinstance(problem, dict):
-                continue
-            contest_id = problem.get("contestId")
-            index = problem.get("index")
-            if isinstance(contest_id, int) and isinstance(index, str):
-                result.append(str(contest_id) + index)
-        return result
+        if self._problem_identities is None:
+            result: list[ProblemIdentity] = []
+            for problem in _load_problems():
+                if not isinstance(problem, dict):
+                    continue
+                contest_id = problem.get("contestId")
+                index = problem.get("index")
+                if isinstance(contest_id, int) and isinstance(index, str):
+                    result.append(
+                        _validate_problem_identity(
+                            ProblemIdentity(
+                                str(contest_id) + index,
+                                str(contest_id),
+                                index,
+                            )
+                        )
+                    )
+            self._problem_identities = tuple(result)
+        return list(self._problem_identities)
+
+    def problem_codes(self) -> list[str]:
+        return [item.problem_code for item in self.problem_identities()]
 
     def fetch_problem(self, problem_code: str) -> SourceFetch:
-        problem = _problem_identity(problem_code)
+        identities = {
+            item.problem_code: item for item in self.problem_identities()
+        }
+        try:
+            problem = identities[str(problem_code)]
+        except KeyError as error:
+            raise ValueError("invalid-problem-code") from error
         url = (
             f"https://codeforces.com/contest/{problem.contest_id}/problem/{problem.index}"
         )
@@ -316,4 +386,5 @@ __all__ = [
     "StatementSource",
     "build_statement_document",
     "fetch_statement_v2",
+    "source_problem_identities",
 ]

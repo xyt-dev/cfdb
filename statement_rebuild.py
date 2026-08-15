@@ -1,183 +1,236 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import hashlib
 import os
 from pathlib import Path
-import re
 import tempfile
 import time
 from typing import Callable
-import uuid
 
 from content_cache import (  # pyright: ignore[reportMissingImports]
     ContentStatus,
-    GenerationStore,
-    RebuildLock,
-    activate_generation,
-    load_active_generation,
+    ContentStore,
+    ContentWriterLock,
 )
 from content_codecs import STATEMENT_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_model import canonical_json
 from statement_crawl import (  # pyright: ignore[reportMissingImports]
     LiveStatementSource,
+    ProblemIdentity,
     StatementBuildResult,
     StatementSource,
     fetch_statement_v2,
+    source_problem_identities,
 )
 from statement_render import render_statement_html  # pyright: ignore[reportMissingImports]
+from statement_model import StatementDocument  # pyright: ignore[reportMissingImports]
 
 PARSER_VERSION = "statement-parser-v2"
 FIXTURE_VERSION = "statement-fixtures-v2"
 DEFAULT_DELAY = 1.5
 DEFAULT_CACHE_ROOT = Path(__file__).resolve().parent / "statements" / "v2"
-_PROBLEM_CODE_RE = re.compile(r"^\d+[A-Za-z][A-Za-z0-9]*$")
+ProgressCallback = Callable[[str, ContentStatus, int, int], None]
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-
-
-def _generation_id(prefix: str) -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    return f"{prefix}-{timestamp}-{uuid.uuid4().hex[:8]}"
-
-
-def _expected_problem_codes(source: StatementSource) -> list[str]:
-    codes = [str(code) for code in source.problem_codes()]
-    if not codes:
-        raise ValueError("problem metadata contains no statement IDs")
-    if any(_PROBLEM_CODE_RE.fullmatch(code) is None for code in codes):
-        raise ValueError("problem metadata contains an invalid statement ID")
-    if len(codes) != len(set(codes)):
-        raise ValueError("problem metadata contains duplicate statement IDs")
-    return sorted(codes)
-
-
-def _same_generation_snapshot(
-    current: GenerationStore | None,
-    expected: GenerationStore,
-) -> bool:
-    return current is not None and current.generation_id == expected.generation_id
-
-
-def _report(store: GenerationStore, activated: bool) -> dict[str, object]:
-    return {
-        "generationId": store.generation_id,
-        "contentKind": store.manifest["contentKind"],
-        "expectedIds": list(store.manifest["expectedIds"]),
-        "counts": dict(store.manifest["counts"]),
-        "activated": activated,
-        "finalizedAt": store.manifest["finalizedAt"],
-    }
+def _expected_problem_identities(source: StatementSource) -> list[ProblemIdentity]:
+    return sorted(source_problem_identities(source), key=lambda item: item.problem_code)
 
 
 def _persist_result(
-    store: GenerationStore,
-    problem_code: str,
+    store: ContentStore,
+    identity: ProblemIdentity,
     result: StatementBuildResult,
-    lock: RebuildLock,
+    lock: ContentWriterLock,
 ) -> None:
-    document_path = None
     evidence = dict(result.evidence)
+    if not evidence:
+        evidence["error"] = "statement build produced no evidence"
     if result.status is ContentStatus.READY:
         if result.document is None:
             raise ValueError("ready statement result lacks a document")
-        document_path = store.write_document(result.document, lock=lock)
-        evidence["validatedAt"] = _utc_now()
-    elif not evidence:
-        evidence["error"] = "statement build produced no evidence"
-    store.set_status(
-        problem_code,
+        if result.document.content_id != identity.problem_code:
+            raise ValueError("statement build returned the wrong problem")
+        store.publish(result.document, lock=lock)
+        return
+    store.record_status(
+        identity.problem_code,
         result.status,
         evidence=evidence,
-        document_path=document_path,
         lock=lock,
     )
-    store.write_manifest(lock=lock)
 
 
-def _run_statement_generation(
+def _requested_identities(
+    store: ContentStore,
+    identities: list[ProblemIdentity],
+    *,
+    force: bool,
+    requested_ids: set[str],
+) -> list[ProblemIdentity]:
+    expected = {item.problem_code for item in identities}
+    if not requested_ids.issubset(expected):
+        raise ValueError("requested problem is absent from metadata")
+    ready = store.ready_ids()
+    selected: list[ProblemIdentity] = []
+    for identity in identities:
+        content_id = identity.problem_code
+        if force or content_id in requested_ids:
+            selected.append(identity)
+            continue
+        try:
+            marker = store.recorded_status(content_id)
+        except (OSError, ValueError, TypeError, KeyError):
+            selected.append(identity)
+            continue
+        marker_status = marker.get("status") if isinstance(marker, dict) else None
+        if marker_status in {
+            ContentStatus.TRANSIENT_FAILURE.value,
+            ContentStatus.INVALID_STRUCTURE.value,
+        }:
+            selected.append(identity)
+            continue
+        if content_id in ready:
+            continue
+        if marker_status == ContentStatus.KNOWN_ABSENT.value:
+            continue
+        selected.append(identity)
+    return selected
+
+
+def _report(
+    store: ContentStore,
+    expected_ids: list[str],
+    results: list[StatementBuildResult],
+    garbage_collection: dict[str, int],
+) -> dict[str, object]:
+    counts = store.status_counts(expected_ids)
+    published = sum(result.status is ContentStatus.READY for result in results)
+    known_absent = sum(
+        result.status is ContentStatus.KNOWN_ABSENT for result in results
+    )
+    failed = sum(
+        result.status
+        in {ContentStatus.TRANSIENT_FAILURE, ContentStatus.INVALID_STRUCTURE}
+        for result in results
+    )
+    completed = (
+        failed == 0
+        and counts["pending"] == 0
+        and counts[ContentStatus.TRANSIENT_FAILURE.value] == 0
+        and counts[ContentStatus.INVALID_STRUCTURE.value] == 0
+    )
+    return {
+        "contentKind": "statement",
+        "expectedCount": len(expected_ids),
+        "attemptedCount": len(results),
+        "publishedCount": published,
+        "knownAbsentCount": known_absent,
+        "failedCount": failed,
+        "statusCounts": counts,
+        "completed": completed,
+        "assetGc": garbage_collection,
+    }
+
+
+def _crawl_statements(
     *,
     source: StatementSource,
     cache_root: str | os.PathLike[str],
-    generation_id: str,
-    expected_ids: list[str],
     delay: float,
     sleep_fn: Callable[[float], None],
-    seed: GenerationStore | None,
+    force: bool,
     requested_ids: set[str],
-    allow_resume: bool,
+    progress_callback: ProgressCallback | None,
 ) -> dict[str, object]:
+    identities = _expected_problem_identities(source)
+    expected_ids = [item.problem_code for item in identities]
     root = Path(cache_root)
-    with RebuildLock(root) as lock:
-        if seed is not None:
-            active_snapshot = load_active_generation(root)
-            if not _same_generation_snapshot(active_snapshot, seed):
-                raise RuntimeError("active statement generation changed before successor creation")
-        generation_path = root / "generations" / generation_id
-        if generation_path.exists():
-            if not allow_resume:
-                raise ValueError(f"statement generation already exists: {generation_id}")
-            store = GenerationStore.open(root, generation_id)
-            if store.manifest["contentKind"] != "statement":
-                raise ValueError("resumed generation has the wrong content kind")
-            if store.manifest["expectedIds"] != expected_ids:
-                raise ValueError("resumed statement generation ID set differs from metadata")
-            if store.manifest["parserVersion"] != PARSER_VERSION:
-                raise ValueError("resumed statement generation parser version differs")
-        else:
-            store = GenerationStore.create(
-                root,
-                generation_id,
-                expected_ids,
-                STATEMENT_CODEC,
-                PARSER_VERSION,
-                FIXTURE_VERSION,
-                lock=lock,
-            )
-            if seed is not None and seed.manifest["parserVersion"] == PARSER_VERSION:
-                store.seed_from(seed, lock=lock)
-                for problem_code in requested_ids:
-                    store.manifest["entries"].pop(problem_code, None)
-
-        if store.manifest["finalizedAt"] is not None:
-            active_snapshot = load_active_generation(root)
-            if active_snapshot is None or active_snapshot.generation_id != generation_id:
-                activate_generation(root, generation_id, lock=lock)
-            return _report(store, True)
-
-        todo: list[str] = []
-        for problem_code in expected_ids:
-            entry = store.manifest["entries"].get(problem_code)
-            status = entry.get("status") if isinstance(entry, dict) else None
-            if status in {ContentStatus.READY.value, ContentStatus.KNOWN_ABSENT.value}:
-                if problem_code not in requested_ids:
-                    continue
-            todo.append(problem_code)
-
-        for index, problem_code in enumerate(todo):
+    with ContentWriterLock(root) as lock:
+        store = ContentStore.initialize(root, STATEMENT_CODEC, lock=lock)
+        todo = _requested_identities(
+            store,
+            identities,
+            force=force,
+            requested_ids=requested_ids,
+        )
+        results: list[StatementBuildResult] = []
+        for offset, identity in enumerate(todo):
             result = fetch_statement_v2(
-                problem_code,
+                identity.problem_code,
                 source=source,
-                asset_root=store.path / "assets",
+                asset_root=store.assets_path,
+                identity=identity,
             )
-            _persist_result(store, problem_code, result, lock)
-            if index + 1 < len(todo):
+            try:
+                _persist_result(store, identity, result, lock)
+            except (OSError, ValueError, TypeError, KeyError) as error:
+                result = StatementBuildResult(
+                    ContentStatus.INVALID_STRUCTURE,
+                    None,
+                    {"error": f"publication-failed:{error}"},
+                )
+                store.record_status(
+                    identity.problem_code,
+                    result.status,
+                    evidence=result.evidence,
+                    lock=lock,
+                )
+            results.append(result)
+            if progress_callback is not None:
+                progress_callback(
+                    identity.problem_code,
+                    result.status,
+                    offset + 1,
+                    len(todo),
+                )
+            if offset + 1 < len(todo):
                 sleep_fn(delay)
-        if not todo:
-            store.write_manifest(lock=lock)
+        garbage_collection = store.garbage_collect_assets(lock=lock)
+        return _report(store, expected_ids, results, garbage_collection)
 
-        store = GenerationStore.open(root, generation_id)
-        activated = False
-        if store.manifest["finalizedAt"] is not None and store.is_activation_ready():
-            if seed is not None:
-                active_snapshot = load_active_generation(root)
-                if not _same_generation_snapshot(active_snapshot, seed):
-                    raise RuntimeError("active statement generation changed before successor activation")
-            activate_generation(root, generation_id, lock=lock)
-            activated = True
-        return _report(store, activated)
+
+def rebuild_statements(
+    *,
+    source: StatementSource | None = None,
+    cache_root: str | os.PathLike[str] | None = None,
+    delay: float = DEFAULT_DELAY,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, object]:
+    active_source = source or LiveStatementSource()
+    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
+    return _crawl_statements(
+        source=active_source,
+        cache_root=root,
+        delay=delay,
+        sleep_fn=sleep_fn,
+        force=True,
+        requested_ids=set(),
+        progress_callback=progress_callback,
+    )
+
+
+def update_statements(
+    *,
+    source: StatementSource | None = None,
+    cache_root: str | os.PathLike[str] | None = None,
+    requested_problems: list[str] | None = None,
+    delay: float = DEFAULT_DELAY,
+    sleep_fn: Callable[[float], None] = time.sleep,
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, object]:
+    active_source = source or LiveStatementSource()
+    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
+    requested = {str(problem_code) for problem_code in requested_problems or ()}
+    return _crawl_statements(
+        source=active_source,
+        cache_root=root,
+        delay=delay,
+        sleep_fn=sleep_fn,
+        force=False,
+        requested_ids=requested,
+        progress_callback=progress_callback,
+    )
 
 
 def validate_statement(
@@ -186,109 +239,53 @@ def validate_statement(
     source: StatementSource | None = None,
 ) -> dict[str, object]:
     active_source = source or LiveStatementSource()
-    with tempfile.TemporaryDirectory(prefix="cfdb-statement-validation-") as directory:
+    try:
+        identities = {
+            item.problem_code: item
+            for item in _expected_problem_identities(active_source)
+        }
+        identity = identities[str(problem_code)]
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        return {
+            "ok": False,
+            "problemCode": str(problem_code),
+            "status": ContentStatus.KNOWN_ABSENT.value,
+            "error": str(error),
+        }
+    with tempfile.TemporaryDirectory() as directory:
+        store = ContentStore.initialize(directory, STATEMENT_CODEC)
         result = fetch_statement_v2(
-            problem_code,
+            identity.problem_code,
             source=active_source,
-            asset_root=Path(directory) / "assets",
+            asset_root=store.assets_path,
+            identity=identity,
         )
         if result.status is not ContentStatus.READY or result.document is None:
             return {
                 "ok": False,
-                "problemCode": str(problem_code),
+                "problemCode": identity.problem_code,
                 "status": result.status.value,
-                "errors": [dict(result.evidence)],
-                "canonicalJsonSha256": None,
+                "evidence": dict(result.evidence),
             }
-        try:
-            render_statement_html(result.document)
-        except Exception as error:
-            return {
-                "ok": False,
-                "problemCode": str(problem_code),
-                "status": ContentStatus.INVALID_STRUCTURE.value,
-                "errors": [{"error": f"render-failed:{error}"}],
-                "canonicalJsonSha256": None,
-            }
-        canonical = canonical_json(result.document).encode("utf-8")
+        store.publish(result.document)
+        document = store.load_document(identity.problem_code)
+        if not isinstance(document, StatementDocument):
+            raise ValueError("statement store returned the wrong document type")
+        html = render_statement_html(document)
+        payload = canonical_json(document).encode("utf-8")
         return {
             "ok": True,
-            "problemCode": result.document.problem_code,
-            "status": result.status.value,
-            "sourceKind": result.document.source_kind,
-            "assets": list(result.document.assets),
-            "errors": [],
-            "canonicalJsonSha256": hashlib.sha256(canonical).hexdigest(),
+            "problemCode": identity.problem_code,
+            "status": ContentStatus.READY.value,
+            "documentSha256": hashlib.sha256(payload).hexdigest(),
+            "htmlBytes": len(html.encode("utf-8")),
         }
-
-
-def rebuild_statements(
-    *,
-    source: StatementSource | None = None,
-    cache_root: str | os.PathLike[str] | None = None,
-    generation_id: str | None = None,
-    delay: float = DEFAULT_DELAY,
-    sleep_fn: Callable[[float], None] = time.sleep,
-) -> dict[str, object]:
-    active_source = source or LiveStatementSource()
-    expected = _expected_problem_codes(active_source)
-    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
-    return _run_statement_generation(
-        source=active_source,
-        cache_root=root,
-        generation_id=generation_id or _generation_id("rebuild"),
-        expected_ids=expected,
-        delay=delay,
-        sleep_fn=sleep_fn,
-        seed=None,
-        requested_ids=set(),
-        allow_resume=True,
-    )
-
-
-def update_statements(
-    *,
-    source: StatementSource | None = None,
-    cache_root: str | os.PathLike[str] | None = None,
-    generation_id: str | None = None,
-    requested_problems: list[str] | None = None,
-    delay: float = DEFAULT_DELAY,
-    sleep_fn: Callable[[float], None] = time.sleep,
-) -> dict[str, object]:
-    active_source = source or LiveStatementSource()
-    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
-    active = load_active_generation(root)
-    if active is None:
-        raise ValueError("statement v2 is not initialized")
-    if active.manifest["contentKind"] != "statement":
-        raise ValueError("active generation is not a statement generation")
-    metadata_ids = _expected_problem_codes(active_source)
-    expected = sorted(set(active.manifest["expectedIds"]) | set(metadata_ids))
-    requested = {str(problem_code) for problem_code in requested_problems or ()}
-    if not requested.issubset(expected):
-        raise ValueError("requested problem is absent from metadata and active generation")
-    known_absent = {
-        problem_code
-        for problem_code, entry in active.manifest["entries"].items()
-        if isinstance(entry, dict)
-        and entry.get("status") == ContentStatus.KNOWN_ABSENT.value
-    }
-    new_ids = set(expected) - set(active.manifest["expectedIds"])
-    return _run_statement_generation(
-        source=active_source,
-        cache_root=root,
-        generation_id=generation_id or _generation_id("update"),
-        expected_ids=expected,
-        delay=delay,
-        sleep_fn=sleep_fn,
-        seed=active,
-        requested_ids=requested | known_absent | new_ids,
-        allow_resume=False,
-    )
 
 
 __all__ = [
     "DEFAULT_CACHE_ROOT",
+    "FIXTURE_VERSION",
+    "PARSER_VERSION",
     "rebuild_statements",
     "update_statements",
     "validate_statement",

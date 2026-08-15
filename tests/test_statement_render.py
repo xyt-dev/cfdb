@@ -29,12 +29,26 @@ def sample(input_text: str, output_text: str):
             Node(
                 kind="section",
                 attrs={"role": "sample_input"},
-                children=[Node(kind="code_block", text=input_text)],
+                children=[
+                    Node(
+                        kind="heading",
+                        attrs={"level": 3},
+                        children=[Node(kind="text", text="Input")],
+                    ),
+                    Node(kind="code_block", text=input_text),
+                ],
             ),
             Node(
                 kind="section",
                 attrs={"role": "sample_output"},
-                children=[Node(kind="code_block", text=output_text)],
+                children=[
+                    Node(
+                        kind="heading",
+                        attrs={"level": 3},
+                        children=[Node(kind="text", text="Output")],
+                    ),
+                    Node(kind="code_block", text=output_text),
+                ],
             ),
         ],
     )
@@ -56,6 +70,8 @@ class StatementRenderTests(unittest.TestCase):
         self.assertEqual(html.count('class="cf-sample-input"'), 2)
         self.assertEqual(html.count('class="cf-sample-output"'), 2)
         self.assertLess(html.index('class="cf-sample-input"'), html.index('class="cf-sample-output"'))
+        self.assertEqual(html.count("<h3>Input</h3>"), 2)
+        self.assertEqual(html.count("<h3>Output</h3>"), 2)
 
     def test_pdf_attachment_renders_as_escaped_local_link_only(self):
         href = "/statement-assets/" + "a" * 64 + ".pdf"

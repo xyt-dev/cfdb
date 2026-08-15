@@ -1,6 +1,6 @@
 # Codeforces Content IR V2-Only Design
 
-**Status:** Approved
+**Status:** Superseded for storage/publication/bootstrap/API initialization by `2026-08-15-codeforces-direct-item-publication-design.md`; typed IR and rendering sections remain historical design context.
 
 **Date:** 2026-08-15
 

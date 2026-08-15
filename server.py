@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Serve static UI, metadata, solutions, and read-only v2 content APIs."""
+from concurrent.futures import ThreadPoolExecutor
 import http.server
 import hashlib
 from pathlib import Path
-import re
 import json
 import os
 import subprocess
@@ -17,7 +17,7 @@ from content_asset_policy import (  # pyright: ignore[reportMissingImports]
     asset_magic_is_valid,
     parse_asset_name,
 )
-from content_cache import ContentStatus, load_active_generation  # pyright: ignore[reportMissingImports]
+from content_cache import ContentStatus, ContentStore  # pyright: ignore[reportMissingImports]
 from editorial_rebuild import update_editorials
 from statement_rebuild import update_statements  # pyright: ignore[reportMissingImports]
 from editorial_render import render_editorial_html
@@ -38,82 +38,132 @@ except ValueError:
     PORT = 8765
 
 
-# 爬取进度状态（/api/progress 暴露给前端）
-crawl_state = {"stage": "idle", "done": 0, "total": 0, "cached": 0, "fetched": 0, "failed": 0}
+# Background crawl progress exposed by /api/progress.
+crawl_state = {
+    "stage": "idle",
+    "done": 0,
+    "total": 0,
+    "cached": 0,
+    "fetched": 0,
+    "failed": 0,
+    "contentStatus": {"statement": "idle", "editorial": "idle"},
+    "content": {},
+}
+_crawl_state_lock = threading.Lock()
 
 
-def _on_progress(done, total, cached, fetched, failed):
-    crawl_state.update(done=done, total=total, cached=cached,
-                       fetched=fetched, failed=failed)
+def _content_progress_callback(content_kind: str):
+    def update(content_id: str, status: ContentStatus, done: int, total: int) -> None:
+        with _crawl_state_lock:
+            detail = crawl_state["content"].setdefault(
+                content_kind,
+                {"done": 0, "total": 0, "failed": 0},
+            )
+            detail.update(
+                currentId=content_id,
+                currentStatus=status.value,
+                done=done,
+                total=total,
+            )
+            if status in {
+                ContentStatus.TRANSIENT_FAILURE,
+                ContentStatus.INVALID_STRUCTURE,
+            }:
+                detail["failed"] = detail.get("failed", 0) + 1
+            crawl_state["stage"] = "content"
+            crawl_state["done"] = sum(
+                item.get("done", 0) for item in crawl_state["content"].values()
+            )
+            crawl_state["total"] = sum(
+                item.get("total", 0) for item in crawl_state["content"].values()
+            )
+            crawl_state["fetched"] = crawl_state["done"]
+            crawl_state["failed"] = sum(
+                item.get("failed", 0) for item in crawl_state["content"].values()
+            )
+
+    return update
 
 
 def _record_content_update(content_kind: str, report: dict) -> None:
-    counts = report.get("counts")
+    counts = report.get("statusCounts")
     if not isinstance(counts, dict):
-        raise ValueError(f"{content_kind} update report has invalid counts")
-    activated_value = report.get("activated")
-    activated = isinstance(activated_value, bool) and activated_value
-    generation_id = report.get("generationId")
-    crawl_state["contentStatus"][content_kind] = (
-        "updated" if activated else "update_failed"
-    )
-    crawl_state["generations"][content_kind] = {
-        "generationId": generation_id,
-        "statusCounts": dict(counts),
-        "activated": activated,
-    }
-    numeric_counts = [value for value in counts.values() if isinstance(value, int)]
-    crawl_state.update(
-        generationId=generation_id,
-        statusCounts=dict(counts),
-        total=sum(numeric_counts),
-        cached=counts.get("ready", 0),
-        fetched=counts.get("ready", 0),
-        failed=(
-            counts.get("transient_failure", 0)
-            + counts.get("invalid_structure", 0)
-        ),
-    )
+        raise ValueError(f"{content_kind} update report has invalid status counts")
+    completed_value = report.get("completed")
+    completed = isinstance(completed_value, bool) and completed_value
+    with _crawl_state_lock:
+        crawl_state["contentStatus"][content_kind] = (
+            "complete" if completed else "partial"
+        )
+        crawl_state["content"][content_kind] = {
+            **crawl_state["content"].get(content_kind, {}),
+            "statusCounts": dict(counts),
+            "expectedCount": report.get("expectedCount", 0),
+            "attemptedCount": report.get("attemptedCount", 0),
+            "publishedCount": report.get("publishedCount", 0),
+            "failed": report.get("failedCount", 0),
+            "completed": completed,
+        }
+        crawl_state["cached"] = sum(
+            item.get("statusCounts", {}).get("ready", 0)
+            for item in crawl_state["content"].values()
+        )
+        crawl_state["failed"] = sum(
+            item.get("failed", 0) for item in crawl_state["content"].values()
+        )
 
 
-def _update_active_content(content_kind: str, root: Path, updater) -> None:
-    if not (root / "current.json").is_file():
-        crawl_state["contentStatus"][content_kind] = "v2_not_initialized"
-        print(f"[auto-update] ⏭️ {content_kind} v2 尚未初始化，跳过增量更新")
-        return
-    crawl_state["stage"] = f"{content_kind}s"
-    print(f"[auto-update] 构建增量 v2 {content_kind} 代际...")
+def _update_content(content_kind: str, root: Path, updater) -> None:
+    with _crawl_state_lock:
+        crawl_state["contentStatus"][content_kind] = "crawling"
+    print(f"[auto-update] crawling missing {content_kind} content...")
     try:
-        report = updater()
+        report = updater(
+            cache_root=root,
+            progress_callback=_content_progress_callback(content_kind),
+        )
         _record_content_update(content_kind, report)
     except Exception as error:
-        crawl_state["contentStatus"][content_kind] = "error"
-        crawl_state["generations"][content_kind] = {"error": str(error)}
-        print(f"[auto-update] ⚠️ {content_kind} 增量更新失败: {error}")
+        with _crawl_state_lock:
+            crawl_state["contentStatus"][content_kind] = "error"
+            crawl_state["content"][content_kind] = {"error": str(error)}
+        print(f"[auto-update] {content_kind} crawl failed: {error}")
         return
-    counts = crawl_state["generations"][content_kind]["statusCounts"]
+    counts = report["statusCounts"]
     print(
-        f"[auto-update] ✅ v2 {content_kind} 代际 "
-        f"{report.get('generationId')}: ready {counts.get('ready', 0)} | "
+        f"[auto-update] {content_kind}: ready {counts.get('ready', 0)} | "
         f"known_absent {counts.get('known_absent', 0)} | "
-        f"failed {counts.get('transient_failure', 0) + counts.get('invalid_structure', 0)}"
+        f"failed {report.get('failedCount', 0)}"
     )
+
+
+def _reload_problems() -> None:
+    global PROBLEMS
+    try:
+        with open(os.path.join(ROOT, "problems.json"), encoding="utf-8") as problem_file:
+            value = json.load(problem_file)
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("unable to reload problems.json") from error
+    if not isinstance(value, list):
+        raise ValueError("problems.json must contain a list")
+    PROBLEMS = value
 
 
 def auto_update():
-    """Refresh metadata, then increment only initialized v2 content roots."""
+    """Refresh metadata, then crawl both content kinds from any store state."""
     try:
-        crawl_state.clear()
-        crawl_state.update(
-            stage="meta",
-            done=0,
-            total=0,
-            cached=0,
-            fetched=0,
-            failed=0,
-            contentStatus={},
-            generations={},
-        )
+        with _crawl_state_lock:
+            crawl_state.clear()
+            crawl_state.update(
+                stage="meta",
+                done=0,
+                total=0,
+                cached=0,
+                fetched=0,
+                failed=0,
+                contentStatus={"statement": "idle", "editorial": "idle"},
+                content={},
+            )
         result = subprocess.run(
             [sys.executable, os.path.join(ROOT, "update.py")],
             capture_output=True,
@@ -121,24 +171,42 @@ def auto_update():
         )
         output = (result.stdout + result.stderr).decode("utf-8", "replace").strip()
         ok = result.returncode == 0
-        print(f"[auto-update] {'✅ 元数据已刷新' if ok else '⚠️ 元数据更新失败'}")
+        print(f"[auto-update] {'metadata refreshed' if ok else 'metadata refresh failed'}")
         for line in output.splitlines()[-2:]:
             print(f"  {line}")
         if not ok:
-            print("[auto-update] ⏭️ 跳过内容更新（元数据刷新失败）")
-            crawl_state["stage"] = "idle"
+            with _crawl_state_lock:
+                crawl_state["stage"] = "error"
+                crawl_state["error"] = "metadata refresh failed"
             return
-
-        _update_active_content("statement", STATEMENT_V2_ROOT, update_statements)
-        _update_active_content("editorial", EDITORIAL_V2_ROOT, update_editorials)
-        crawl_state["stage"] = "done"
-        print("[auto-update] ✅ 全部完成")
+        _reload_problems()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(
+                    _update_content,
+                    "statement",
+                    STATEMENT_V2_ROOT,
+                    update_statements,
+                ),
+                executor.submit(
+                    _update_content,
+                    "editorial",
+                    EDITORIAL_V2_ROOT,
+                    update_editorials,
+                ),
+            ]
+            for future in futures:
+                future.result()
+        with _crawl_state_lock:
+            crawl_state["stage"] = "done"
+        print("[auto-update] all content crawls finished")
     except Exception as error:
         import traceback
 
-        crawl_state["stage"] = "error"
-        crawl_state["error"] = str(error)
-        print(f"[auto-update] ⚠️ 异常: {error}", flush=True)
+        with _crawl_state_lock:
+            crawl_state["stage"] = "error"
+            crawl_state["error"] = str(error)
+        print(f"[auto-update] error: {error}", flush=True)
         traceback.print_exc()
 
 
@@ -166,14 +234,6 @@ def _content_error(content_kind: str, status: str, error: str) -> dict:
     }
 
 
-def _uninitialized(content_kind: str) -> dict:
-    return _content_error(
-        content_kind,
-        "v2_not_initialized",
-        f"{content_kind} v2 is not initialized",
-    )
-
-
 def _build_content_payload(
     content_id: str,
     *,
@@ -182,26 +242,11 @@ def _build_content_payload(
     renderer,
     document_validator=None,
 ) -> dict:
-    if not (root / "current.json").is_file():
-        return _uninitialized(content_kind)
-    try:
-        store = load_active_generation(root)
-        if store is None:
-            return _uninitialized(content_kind)
-        if store.manifest["contentKind"] != content_kind:
-            return _content_error(
-                content_kind,
-                "invalid_structure",
-                "active generation has the wrong content kind",
-            )
-        entry = store.manifest["entries"].get(content_id)
-        if not isinstance(entry, dict):
-            return _content_error(
-                content_kind,
-                "invalid_structure",
-                f"active manifest missing {content_kind}",
-            )
-        status = entry.get("status")
+    store = ContentStore(root, content_kind)
+    document_path = store.document_path(content_id)
+    if not document_path.is_file():
+        status_entry = store.item_status(content_id)
+        status = status_entry.get("status")
         if status == ContentStatus.KNOWN_ABSENT.value:
             return {
                 "format": None,
@@ -210,12 +255,25 @@ def _build_content_payload(
                 "status": "known_absent",
                 "known": True,
             }
-        if status != ContentStatus.READY.value:
+        evidence = status_entry.get("evidence")
+        status_error = None
+        if isinstance(evidence, dict):
+            status_error = evidence.get("error") or evidence.get("errors")
+        if status in {
+            ContentStatus.TRANSIENT_FAILURE.value,
+            ContentStatus.INVALID_STRUCTURE.value,
+        }:
             return _content_error(
                 content_kind,
-                "invalid_structure",
-                f"active {content_kind} entry is nonterminal",
+                str(status),
+                str(status_error or status),
             )
+        return _content_error(
+            content_kind,
+            "pending",
+            f"{content_kind} has not been crawled yet",
+        )
+    try:
         document = store.load_document(content_id)
         if document_validator is not None and not document_validator(document):
             return _content_error(content_kind, "invalid_ref", "invalid ref")
@@ -239,7 +297,7 @@ def _build_content_payload(
 
 
 def build_editorial_payload(contest_id, *, cache_root=None) -> dict:
-    """Read one editorial from the active immutable v2 generation."""
+    """Read one directly published editorial document."""
     contest_id = str(contest_id)
     if not _valid_contest_id(contest_id):
         return _content_error("editorial", "invalid_ref", "invalid ref")
@@ -253,10 +311,9 @@ def build_editorial_payload(contest_id, *, cache_root=None) -> dict:
 
 
 def build_statement_payload(problem_code, *, cache_root=None) -> dict:
-    """Read one statement from the active immutable v2 generation."""
+    """Read one directly published statement document."""
     problem_code = str(problem_code)
-    match = re.fullmatch(r"([0-9]{1,6})([A-Za-z0-9]{1,3})", problem_code)
-    if match is None or not _valid_ref(match.group(1), match.group(2)):
+    if not problem_code or len(problem_code) > 9 or not problem_code.isalnum() or not problem_code[0].isdigit():
         return _content_error("statement", "invalid_ref", "invalid ref")
     root = Path(cache_root) if cache_root is not None else STATEMENT_V2_ROOT
     return _build_content_payload(
@@ -282,7 +339,7 @@ def _build_statement_payload_from_parts(contest_id: str, index: str) -> dict:
     )
 
 
-def _read_active_asset(
+def _read_content_asset(
     content_kind: str,
     raw_name: str,
     root: Path,
@@ -292,10 +349,7 @@ def _read_active_asset(
     identity = parse_asset_name(raw_name, content_kind=content_kind)
     if identity is None or Path(raw_name).name != raw_name:
         raise ValueError("invalid asset name")
-    store = load_active_generation(root)
-    if store is None or store.manifest["contentKind"] != content_kind:
-        raise FileNotFoundError(raw_name)
-    asset_path = store.path / "assets" / identity.name
+    asset_path = root / "assets" / identity.name
     if asset_path.is_symlink() or not asset_path.is_file():
         raise FileNotFoundError(raw_name)
     payload = asset_path.read_bytes()
@@ -313,26 +367,20 @@ def _payload_http_status(payload: dict) -> int:
     status = payload.get("status")
     if status == "invalid_ref":
         return 400
-    if status == "v2_not_initialized":
+    if status == "pending":
+        return 202
+    if status == "transient_failure":
         return 503
     if status == "invalid_structure":
         return 500
     return 200
 
 
-def _active_ready_ids(root: Path, content_kind: str) -> set[str]:
+def _ready_document_ids(root: Path, content_kind: str) -> set[str]:
     try:
-        store = load_active_generation(root)
+        return ContentStore(root, content_kind).document_ids()
     except (OSError, ValueError, TypeError, KeyError):
         return set()
-    if store is None or store.manifest.get("contentKind") != content_kind:
-        return set()
-    return {
-        content_id
-        for content_id, entry in store.manifest["entries"].items()
-        if isinstance(entry, dict)
-        and entry.get("status") == ContentStatus.READY.value
-    }
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -390,7 +438,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(400, b"invalid asset name", "text/plain")
             else:
                 try:
-                    body, ctype, headers = _read_active_asset(content_kind, raw_name, root)
+                    body, ctype, headers = _read_content_asset(content_kind, raw_name, root)
                 except (OSError, ValueError, TypeError, KeyError):
                     self._send(404, b"not found", "text/plain")
                 else:
@@ -427,14 +475,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except OSError:
                 self._send(404, b"not found", "text/plain")
         elif u.path == "/api/problems":
-            # hasFile: 活动 v2 题面已就绪 | hasSolution: 已有自己的解题代码
-            cached = _active_ready_ids(STATEMENT_V2_ROOT, "statement")
+            # hasFile: a directly published statement exists | hasSolution: solution code exists
+            cached = _ready_document_ids(STATEMENT_V2_ROOT, "statement")
             solved = set()
             try:
-                for n in os.listdir(cfcrawl.SOLUTION_DIR):
-                    solved.add(n.split(".")[0])
+                for name in os.listdir(cfcrawl.SOLUTION_DIR):
+                    solved.add(name.split(".")[0])
             except OSError:
-                pass
+                solved.clear()
             enriched = [{**p, "hasFile": p["id"] in cached,
                          "hasSolution": p["id"] in solved} for p in PROBLEMS]
             self._send(200, json.dumps(enriched).encode(), "application/json")
@@ -485,16 +533,16 @@ if __name__ == "__main__":
         reconfigure_stdout = getattr(sys.stdout, "reconfigure", None)
         if reconfigure_stdout is not None:
             reconfigure_stdout(line_buffering=True)
-    except OSError:
-        pass
+    except OSError as error:
+        print(f"stdout line buffering unavailable: {error}", file=sys.stderr)
     print(f"cfdb 服务器启动: http://localhost:{PORT}", flush=True)
     try:
         import socket
         host_ip = socket.gethostbyname(socket.gethostname())
         if not host_ip.startswith("127."):
             print(f"局域网访问:   http://{host_ip}:{PORT}", flush=True)
-    except Exception:
-        pass
+    except Exception as error:
+        print(f"局域网地址检测失败: {error}", file=sys.stderr)
     print(f"题目数: {len(PROBLEMS)} | 题面目录: {cfcrawl.STATEMENT_DIR} | 解题目录: {cfcrawl.SOLUTION_DIR}")
     threading.Thread(target=auto_update, daemon=True).start()
     print("后台刷新元数据中...")

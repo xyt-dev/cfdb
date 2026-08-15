@@ -10,6 +10,7 @@ statement_crawl = import_module("statement_crawl")
 ContentStatus = import_module("content_cache").ContentStatus
 from content_assets import AssetFetchResult  # pyright: ignore[reportMissingImports]
 SourceFetch = statement_crawl.SourceFetch
+ProblemIdentity = statement_crawl.ProblemIdentity
 fetch_statement_v2 = statement_crawl.fetch_statement_v2
 
 FIXTURES = Path(__file__).parent / "fixtures" / "statements"
@@ -77,6 +78,28 @@ class StatementCrawlerTests(unittest.TestCase):
             self.assertTrue(images[0].attrs["src"].startswith("/statement-assets/"))
             self.assertEqual(len(list(Path(directory).iterdir())), 1)
             self.assertEqual(source.asset_urls, ["https://codeforces.com/synthetic/diagram.png"])
+
+    def test_numeric_index_uses_exact_metadata_identity(self):
+        class NumericStatementSource(FixtureStatementSource):
+            def problem_identities(self) -> list[object]:
+                return [ProblemIdentity("92101", "921", "01")]
+
+        source = NumericStatementSource(
+            problem_code="92101",
+            source_fetch=SourceFetch(
+                source_url="https://codeforces.com/contest/921/problem/01",
+                source_kind="html",
+                body=fixture("normal.html"),
+                content_type="text/html",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = fetch_statement_v2("92101", source=source, asset_root=directory)
+
+        self.assertIs(result.status, ContentStatus.READY)
+        self.assertEqual(result.document.problem_code, "92101")
+        self.assertEqual(result.document.contest_id, "921")
+        self.assertEqual(result.document.index, "01")
 
     def test_pdf_source_becomes_local_attachment_not_text(self):
         source = FixtureStatementSource(

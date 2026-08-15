@@ -2,10 +2,10 @@
 """Update cfdb metadata, statements, and editorial caches."""
 
 import argparse
+from contextlib import suppress
 from collections.abc import Mapping
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 
@@ -43,8 +43,8 @@ def fetch() -> bytes:
                 return result.stdout
         except RuntimeError:
             raise
-        except Exception:
-            pass
+        except (OSError, subprocess.SubprocessError) as error:
+            print(f"metadata request error: {error}", file=sys.stderr)
         print(f"⚠️ 第 {attempt + 1} 次抓取失败，重试...", file=sys.stderr)
         import time
         time.sleep(3 * (attempt + 1))
@@ -97,10 +97,8 @@ def update_metadata() -> int:
             json.dump(output, output_file)
         os.replace(temporary, output_path)
     except OSError as error:
-        try:
+        with suppress(OSError):
             os.remove(temporary)
-        except OSError:
-            pass
         print(f"❌ 写入 problems.json 失败: {error}", file=sys.stderr)
         return 1
 
@@ -118,33 +116,33 @@ def update_metadata() -> int:
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Refresh cfdb metadata or update v2 content generations.",
+        description="Refresh metadata or crawl and publish v2 content items."
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument(
         "--statements",
         action="store_true",
-        help="incrementally update statements, or rebuild with --rebuild",
+        help="crawl missing statements and publish each completed item"
     )
     modes.add_argument(
         "--editorials",
         action="store_true",
-        help="incrementally update editorials, or rebuild with --rebuild",
+        help="crawl missing editorials and publish each completed item"
     )
     modes.add_argument(
         "--validate-statement",
         metavar="PROBLEM_CODE",
-        help="build and validate one statement without activation",
+        help="build and validate one statement without publishing it"
     )
     modes.add_argument(
         "--validate-editorial",
         metavar="CONTEST_ID",
-        help="build and validate one editorial without activation",
+        help="build and validate one editorial without publishing it"
     )
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="with --statements or --editorials, build a full v2 generation",
+        help="force-refresh every selected content item while publishing progressively"
     )
     return parser
 
@@ -155,14 +153,6 @@ def _report_exit(report: Mapping[str, object], success_key: str) -> int:
     return 0 if isinstance(success, bool) and success else 1
 
 
-def _require_pointer(root: Path, content_kind: str, rebuild_command: str) -> bool:
-    if (root / "current.json").is_file():
-        return True
-    print(
-        f"❌ {content_kind} v2 is not initialized; run: {rebuild_command}",
-        file=sys.stderr,
-    )
-    return False
 
 
 def main(argv=None) -> int:
@@ -177,26 +167,12 @@ def main(argv=None) -> int:
         return _report_exit(validate_editorial(args.validate_editorial), "ok")
     if args.statements:
         if args.rebuild:
-            return _report_exit(rebuild_statements(), "activated")
-        root = Path(cfcrawl.STATEMENT_DIR) / "v2"
-        if not _require_pointer(
-            root,
-            "statement",
-            "python3 update.py --statements --rebuild",
-        ):
-            return 1
-        return _report_exit(update_statements(), "activated")
+            return _report_exit(rebuild_statements(), "completed")
+        return _report_exit(update_statements(), "completed")
     if args.editorials:
         if args.rebuild:
-            return _report_exit(rebuild_editorials(), "activated")
-        root = Path(cfcrawl.EDITORIAL_DIR) / "v2"
-        if not _require_pointer(
-            root,
-            "editorial",
-            "python3 update.py --editorials --rebuild",
-        ):
-            return 1
-        return _report_exit(update_editorials(), "activated")
+            return _report_exit(rebuild_editorials(), "completed")
+        return _report_exit(update_editorials(), "completed")
     return update_metadata()
 
 

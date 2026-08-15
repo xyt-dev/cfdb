@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -7,11 +8,10 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from unittest.mock import patch
 
-import cfcrawl
-from content_cache import ContentStatus as ContestStatus, GenerationStore, activate_generation  # pyright: ignore[reportMissingImports]
-from editorial_model import EditorialDocument, Node
+from content_cache import ContentStatus, ContentStore  # pyright: ignore[reportMissingImports]
 from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
-from server import Handler, build_editorial_payload
+from editorial_model import EditorialDocument, Node
+import server
 
 
 CHECKED_ABSENCE = {
@@ -36,7 +36,7 @@ CHECKED_ABSENCE = {
 }
 
 
-def make_document(contest_id="1700"):
+def make_document(contest_id: str = "1700") -> EditorialDocument:
     return EditorialDocument(
         contest_id=contest_id,
         source_url=f"https://codeforces.com/blog/entry/{contest_id}",
@@ -60,49 +60,28 @@ def make_document(contest_id="1700"):
 
 
 class EditorialServerTests(unittest.TestCase):
-    def create_active_generation(self, root, entries, *, assets=None):
-        store = GenerationStore.create(
-            root,
-            "g1",
-            entries,
-            EDITORIAL_CODEC,
-            parser_version="parser-1",
-            fixture_version="fixtures-1",
-        )
-        if assets:
-            assets_path = store.path / "assets"
-            assets_path.mkdir()
-            for name, payload in assets.items():
-                (assets_path / name).write_bytes(payload)
-        for contest_id, status in entries.items():
-            if status is ContestStatus.READY:
-                document = make_document(contest_id)
-                document_path = store.write_document(document)
-                store.set_status(
-                    contest_id,
-                    status,
-                    evidence={"validatedAt": "2026-08-14T10:00:00Z"},
-                    document_path=document_path,
-                )
-            else:
-                store.set_status(contest_id, status, evidence=CHECKED_ABSENCE)
-        store.write_manifest()
-        activate_generation(root, "g1")
+    def publish(self, root: Path, document: EditorialDocument) -> ContentStore:
+        store = ContentStore.initialize(root, EDITORIAL_CODEC)
+        store.publish(document)
         return store
 
-    def request(self, path, headers=None):
+    def request(
+        self,
+        path: str,
+        *,
+        editorial_root: Path | None = None,
+        headers: dict[str, str] | None = None,
+    ):
         import http.server
 
-        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
         try:
             url = f"http://127.0.0.1:{httpd.server_address[1]}{path}"
             request = Request(url, headers=headers or {})
-            with patch(
-                "server.EDITORIAL_V2_ROOT",
-                Path(cfcrawl.EDITORIAL_DIR) / "v2",
-            ):
+            root = editorial_root or server.EDITORIAL_V2_ROOT
+            with patch.object(server, "EDITORIAL_V2_ROOT", root):
                 try:
                     with urlopen(request, timeout=5) as response:
                         return response.status, dict(response.headers), response.read()
@@ -116,10 +95,10 @@ class EditorialServerTests(unittest.TestCase):
             httpd.server_close()
             thread.join(timeout=5)
 
-    def test_ready_v2_payload_contains_sanitized_html_and_schema(self):
+    def test_published_editorial_is_immediately_available_and_sanitized(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            self.create_active_generation(root, {"1700": ContestStatus.READY})
+            self.publish(root, make_document())
             expected = {
                 "format": "html",
                 "contentKind": "editorial",
@@ -130,62 +109,48 @@ class EditorialServerTests(unittest.TestCase):
                 "status": "ready",
             }
 
-            self.assertEqual(build_editorial_payload("1700", cache_root=root), expected)
-            with patch.object(cfcrawl, "EDITORIAL_DIR", directory):
-                status, headers, body = self.request("/api/editorial?contestId=1700")
+            self.assertEqual(server.build_editorial_payload("1700", cache_root=root), expected)
+            status, headers, body = self.request(
+                "/api/editorial?contestId=1700",
+                editorial_root=root,
+            )
+
             self.assertEqual(status, 200)
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
 
-    def test_malformed_cache_valid_document_fails_closed_without_mutation(self):
+    def test_missing_editorial_is_pending_without_initializing_root(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            editorial_directory = root / "editorials"
-            cache_root = editorial_directory / "v2"
-            store = self.create_active_generation(
-                cache_root,
-                {"1700": ContestStatus.READY},
-            )
-            document_path = store.path / "documents" / "1700.json"
-            value = json.loads(document_path.read_text(encoding="utf-8"))
-            value["document"]["children"][0]["children"][0]["text"] = 42
-            document_path.write_text(
-                json.dumps(value, sort_keys=True, separators=(",", ":")),
-                encoding="utf-8",
-            )
-
-            def snapshot():
-                return {
-                    path.relative_to(root).as_posix(): (
-                        path.stat().st_size,
-                        path.stat().st_mtime_ns,
-                    )
-                    for path in root.rglob("*")
-                    if path.is_file()
-                }
-
+            root = Path(directory) / "v2"
             expected = {
                 "format": None,
                 "contentKind": "editorial",
                 "html": None,
-                "status": "invalid_structure",
+                "status": "pending",
                 "known": False,
-                "error": "ready document digest mismatch",
+                "error": "editorial has not been crawled yet",
             }
-            before_files = snapshot()
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
-                self.assertEqual(build_editorial_payload("1700", cache_root=cache_root), expected)
-                status, headers, body = self.request("/api/editorial?contestId=1700")
 
-            self.assertEqual(status, 500)
+            self.assertEqual(server.build_editorial_payload("1700", cache_root=root), expected)
+            status, headers, body = self.request(
+                "/api/editorial?contestId=1700",
+                editorial_root=root,
+            )
+
+            self.assertEqual(status, 202)
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
-            self.assertEqual(snapshot(), before_files)
+            self.assertFalse(root.exists())
 
-    def test_known_absent_v2_payload_has_null_body(self):
+    def test_known_absent_editorial_has_null_body(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            self.create_active_generation(root, {"9999": ContestStatus.KNOWN_ABSENT})
+            store = ContentStore.initialize(root, EDITORIAL_CODEC)
+            store.record_status(
+                "9999",
+                ContentStatus.KNOWN_ABSENT,
+                evidence=CHECKED_ABSENCE,
+            )
             expected = {
                 "format": None,
                 "contentKind": "editorial",
@@ -194,86 +159,62 @@ class EditorialServerTests(unittest.TestCase):
                 "known": True,
             }
 
-            self.assertEqual(build_editorial_payload("9999", cache_root=root), expected)
-            with patch.object(cfcrawl, "EDITORIAL_DIR", directory):
-                status, headers, body = self.request("/api/editorial?contestId=9999")
+            self.assertEqual(server.build_editorial_payload("9999", cache_root=root), expected)
+            status, _, body = self.request(
+                "/api/editorial?contestId=9999",
+                editorial_root=root,
+            )
+
             self.assertEqual(status, 200)
-            self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
 
-    def test_editorial_without_pointer_is_503_and_ignores_markdown(self):
+    def test_malformed_document_fails_closed_without_request_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            editorial_directory = root / "editorials"
-            editorial_directory.mkdir()
-            (editorial_directory / "1700.md").write_text(
-                "legacy must not leak",
+            root = Path(directory) / "v2"
+            store = self.publish(root, make_document())
+            document_path = store.document_path("1700")
+            value = json.loads(document_path.read_text(encoding="utf-8"))
+            value["document"]["children"][0]["children"][0]["text"] = 42
+            document_path.write_text(
+                json.dumps(value, sort_keys=True, separators=(",", ":")),
                 encoding="utf-8",
             )
-            expected = {
-                "format": None,
-                "contentKind": "editorial",
-                "html": None,
-                "status": "v2_not_initialized",
-                "known": False,
-                "error": "editorial v2 is not initialized",
-            }
+            before = document_path.read_bytes()
 
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
-                self.assertEqual(
-                    build_editorial_payload("1700", cache_root=root / "v2"),
-                    expected,
-                )
-                status, headers, body = self.request("/api/editorial?contestId=1700")
-
-            self.assertEqual(status, 503)
-            self.assertEqual(headers["Content-Type"], "application/json")
-            self.assertEqual(json.loads(body), expected)
-            self.assertNotIn("md", json.loads(body))
-
-    def test_after_v2_activation_missing_contest_does_not_fall_back_to_v1(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            editorial_directory = root / "editorials"
-            editorial_directory.mkdir()
-            (editorial_directory / "2000.md").write_text(
-                "legacy must not leak",
-                encoding="utf-8",
+            payload = server.build_editorial_payload("1700", cache_root=root)
+            status, _, body = self.request(
+                "/api/editorial?contestId=1700",
+                editorial_root=root,
             )
-            cache_root = editorial_directory / "v2"
-            self.create_active_generation(cache_root, {"1700": ContestStatus.READY})
 
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
-                status, headers, body = self.request("/api/editorial?contestId=2000")
-
+            self.assertEqual(payload["status"], "invalid_structure")
             self.assertEqual(status, 500)
-            self.assertEqual(headers["Content-Type"], "application/json")
-            self.assertEqual(
-                json.loads(body),
-                {
-                    "format": None,
-                    "contentKind": "editorial",
-                    "html": None,
-                    "status": "invalid_structure",
-                    "known": False,
-                    "error": "active manifest missing editorial",
-                },
-            )
+            self.assertEqual(json.loads(body)["status"], "invalid_structure")
+            self.assertEqual(document_path.read_bytes(), before)
 
-    def test_payload_read_does_not_change_cache(self):
+    def test_missing_contest_never_falls_back_to_markdown(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            editorial_directory = root / "editorials"
-            cache_root = editorial_directory / "v2"
-            self.create_active_generation(
-                cache_root,
-                {
-                    "1700": ContestStatus.READY,
-                    "9999": ContestStatus.KNOWN_ABSENT,
-                },
+            base = Path(directory)
+            root = base / "v2"
+            self.publish(root, make_document("1700"))
+            (base / "2000.md").write_text("legacy must not leak", encoding="utf-8")
+
+            payload = server.build_editorial_payload("2000", cache_root=root)
+
+            self.assertEqual(payload["status"], "pending")
+            self.assertNotIn("legacy", json.dumps(payload))
+
+    def test_payload_reads_do_not_change_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "v2"
+            store = self.publish(root, make_document())
+            store.record_status(
+                "9999",
+                ContentStatus.KNOWN_ABSENT,
+                evidence=CHECKED_ABSENCE,
             )
 
-            def snapshot():
+            def snapshot() -> dict[str, tuple[int, int]]:
                 return {
                     path.relative_to(root).as_posix(): (
                         path.stat().st_size,
@@ -283,39 +224,33 @@ class EditorialServerTests(unittest.TestCase):
                     if path.is_file()
                 }
 
-            before_files = snapshot()
-            build_editorial_payload("1700", cache_root=cache_root)
-            build_editorial_payload("9999", cache_root=cache_root)
+            before = snapshot()
+            server.build_editorial_payload("1700", cache_root=root)
+            server.build_editorial_payload("9999", cache_root=root)
 
-            self.assertEqual(snapshot(), before_files)
+            self.assertEqual(snapshot(), before)
 
-    def test_invalid_contest_reference_returns_invalid_ref_payload(self):
-        expected = {
-            "format": None,
-            "contentKind": "editorial",
-            "html": None,
-            "status": "invalid_ref",
-            "known": False,
-            "error": "invalid ref",
-        }
-        self.assertEqual(build_editorial_payload("../1700"), expected)
-
+    def test_invalid_contest_reference_returns_400(self):
         status, headers, body = self.request("/api/editorial?contestId=../1700")
+
         self.assertEqual(status, 400)
         self.assertEqual(headers["Content-Type"], "application/json")
-        self.assertEqual(json.loads(body), expected)
+        self.assertEqual(json.loads(body)["status"], "invalid_ref")
 
     def test_reader_payload_static_route_is_exact(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = b"window.CFDBReaderPayload = {};\n"
             (root / "reader_payload.js").write_bytes(source)
-            with patch("server.ROOT", str(root)):
+            with patch.object(server, "ROOT", str(root)):
                 status, headers, body = self.request("/reader_payload.js")
                 nested_status, _, _ = self.request("/nested/reader_payload.js")
 
             self.assertEqual(status, 200)
-            self.assertEqual(headers["Content-Type"], "application/javascript; charset=utf-8")
+            self.assertEqual(
+                headers["Content-Type"],
+                "application/javascript; charset=utf-8",
+            )
             self.assertEqual(body, source)
             self.assertEqual(nested_status, 404)
 
@@ -326,7 +261,7 @@ class EditorialServerTests(unittest.TestCase):
             vendor.mkdir()
             font = b"local-font-bytes"
             (vendor / "ReaderFont.otf").write_bytes(font)
-            with patch("server.ROOT", str(root)):
+            with patch.object(server, "ROOT", str(root)):
                 status, headers, body = self.request(
                     "/vendor/ReaderFont.otf",
                     headers={"Origin": "null"},
@@ -341,36 +276,28 @@ class EditorialServerTests(unittest.TestCase):
         self.assertEqual(headers["Access-Control-Allow-Origin"], "null")
         self.assertEqual(body, font)
         self.assertEqual(api_status, 400)
-        self.assertEqual(api_headers["Content-Type"], "application/json")
         self.assertEqual(api_headers["Cache-Control"], "no-store")
         self.assertNotIn("Access-Control-Allow-Origin", api_headers)
 
-
-    def test_editorial_asset_route_serves_digest_validated_image(self):
-        import hashlib
-
+    def test_editorial_asset_route_serves_direct_digest_validated_image(self):
         payload = b"\x89PNG\r\n\x1a\neditorial-server-fixture"
         digest = hashlib.sha256(payload).hexdigest()
         pdf_payload = b"%PDF-1.7\neditorial-pdf-must-not-serve"
         pdf_digest = hashlib.sha256(pdf_payload).hexdigest()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "v2"
-            self.create_active_generation(
-                root,
-                {"1700": ContestStatus.READY},
-                assets={
-                    f"{digest}.png": payload,
-                    f"{pdf_digest}.pdf": pdf_payload,
-                },
-            )
+            store = ContentStore.initialize(root, EDITORIAL_CODEC)
+            (store.assets_path / f"{digest}.png").write_bytes(payload)
+            (store.assets_path / f"{pdf_digest}.pdf").write_bytes(pdf_payload)
 
-            with patch.object(cfcrawl, "EDITORIAL_DIR", directory):
-                status, headers, body = self.request(
-                    f"/editorial-assets/{digest}.png"
-                )
-                pdf_status, _, _ = self.request(
-                    f"/editorial-assets/{pdf_digest}.pdf"
-                )
+            status, headers, body = self.request(
+                f"/editorial-assets/{digest}.png",
+                editorial_root=root,
+            )
+            pdf_status, _, _ = self.request(
+                f"/editorial-assets/{pdf_digest}.pdf",
+                editorial_root=root,
+            )
 
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "image/png")
