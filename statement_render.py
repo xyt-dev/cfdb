@@ -7,16 +7,16 @@ from content_render import (  # pyright: ignore[reportMissingImports]
     sanitize_image_url,
     sanitize_link_url,
 )
-from editorial_model import EditorialDocument
+from statement_model import StatementDocument
 
 
-def render_editorial_html(document: EditorialDocument) -> str:
+def render_statement_html(document: StatementDocument) -> str:
     return render_content_html(document)
 
 
 __all__ = [
     "RenderError",
-    "render_editorial_html",
+    "render_statement_html",
     "sanitize_attachment_url",
     "sanitize_image_url",
     "sanitize_link_url",
