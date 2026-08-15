@@ -10,6 +10,7 @@ from unittest.mock import patch
 import cfcrawl
 from editorial_cache import ContestStatus, GenerationStore, activate_generation
 from editorial_model import EditorialDocument, Node
+from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from server import Handler, build_editorial_payload
 
 
@@ -59,14 +60,20 @@ def make_document(contest_id="1700"):
 
 
 class EditorialServerTests(unittest.TestCase):
-    def create_active_generation(self, root, entries):
+    def create_active_generation(self, root, entries, *, assets=None):
         store = GenerationStore.create(
             root,
             "g1",
             entries,
+            EDITORIAL_CODEC,
             parser_version="parser-1",
             fixture_version="fixtures-1",
         )
+        if assets:
+            assets_path = store.path / "assets"
+            assets_path.mkdir()
+            for name, payload in assets.items():
+                (assets_path / name).write_bytes(payload)
         for contest_id, status in entries.items():
             if status is ContestStatus.READY:
                 document = make_document(contest_id)
@@ -92,14 +99,18 @@ class EditorialServerTests(unittest.TestCase):
         try:
             url = f"http://127.0.0.1:{httpd.server_address[1]}{path}"
             request = Request(url, headers=headers or {})
-            try:
-                with urlopen(request, timeout=5) as response:
-                    return response.status, dict(response.headers), response.read()
-            except HTTPError as error:
+            with patch(
+                "server.EDITORIAL_V2_ROOT",
+                Path(cfcrawl.EDITORIAL_DIR) / "v2",
+            ):
                 try:
-                    return error.code, dict(error.headers), error.read()
-                finally:
-                    error.close()
+                    with urlopen(request, timeout=5) as response:
+                        return response.status, dict(response.headers), response.read()
+                except HTTPError as error:
+                    try:
+                        return error.code, dict(error.headers), error.read()
+                    finally:
+                        error.close()
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -111,6 +122,7 @@ class EditorialServerTests(unittest.TestCase):
             self.create_active_generation(root, {"1700": ContestStatus.READY})
             expected = {
                 "format": "html",
+                "contentKind": "editorial",
                 "schema": 2,
                 "html": "<p>&lt;safe&gt;click</p>",
                 "url": "https://codeforces.com/blog/entry/1700",
@@ -133,24 +145,17 @@ class EditorialServerTests(unittest.TestCase):
             failed_path = root / "failed_editorials.json"
             failed_path.write_bytes(b'["9999"]\n')
 
-            store = GenerationStore.create(
+            store = self.create_active_generation(
                 cache_root,
-                "g1",
-                ["1700"],
-                parser_version="parser-1",
-                fixture_version="fixtures-1",
+                {"1700": ContestStatus.READY},
             )
-            document = make_document()
-            document.root.children[0].children[0] = Node.from_dict({"kind": "text", "text": 42})
-            document_path = store.write_document(document)
-            store.set_status(
-                "1700",
-                ContestStatus.READY,
-                evidence={"validatedAt": "2026-08-14T10:00:00Z"},
-                document_path=document_path,
+            document_path = store.path / "documents" / "1700.json"
+            value = json.loads(document_path.read_text(encoding="utf-8"))
+            value["document"]["children"][0]["children"][0]["text"] = 42
+            document_path.write_text(
+                json.dumps(value, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
             )
-            store.write_manifest()
-            activate_generation(cache_root, "g1")
 
             def snapshot():
                 return {
@@ -164,10 +169,11 @@ class EditorialServerTests(unittest.TestCase):
 
             expected = {
                 "format": None,
+                "contentKind": "editorial",
                 "html": None,
                 "status": "invalid_structure",
                 "known": False,
-                "error": "'int' object has no attribute 'find'",
+                "error": "finalized generation is not activation-ready",
             }
             before_files = snapshot()
             before_failure_memory = failed_path.read_bytes()
@@ -199,6 +205,7 @@ class EditorialServerTests(unittest.TestCase):
             self.create_active_generation(root, {"9999": ContestStatus.KNOWN_ABSENT})
             expected = {
                 "format": None,
+                "contentKind": "editorial",
                 "html": None,
                 "status": "known_absent",
                 "known": True,
@@ -211,28 +218,39 @@ class EditorialServerTests(unittest.TestCase):
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
 
-    def test_before_v2_activation_payload_uses_legacy_markdown(self):
+    def test_editorial_without_pointer_is_503_and_ignores_markdown(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             editorial_directory = root / "editorials"
             editorial_directory.mkdir()
             (editorial_directory / "1700.md").write_text(
-                "<!-- url: https://codeforces.com/blog/entry/1700 -->\n## Legacy",
+                "legacy must not leak",
                 encoding="utf-8",
             )
             expected = {
-                "format": "markdown",
-                "md": "## Legacy",
-                "url": "https://codeforces.com/blog/entry/1700",
+                "format": None,
+                "contentKind": "editorial",
+                "html": None,
+                "status": "v2_not_initialized",
                 "known": False,
+                "error": "editorial v2 is not initialized",
             }
 
-            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)):
-                self.assertEqual(build_editorial_payload("1700", cache_root=root / "v2"), expected)
+            with patch.object(cfcrawl, "EDITORIAL_DIR", str(editorial_directory)), patch.object(
+                cfcrawl,
+                "read_editorial_md",
+                side_effect=AssertionError("legacy editorial read attempted"),
+            ):
+                self.assertEqual(
+                    build_editorial_payload("1700", cache_root=root / "v2"),
+                    expected,
+                )
                 status, headers, body = self.request("/api/editorial?contestId=1700")
-            self.assertEqual(status, 200)
+
+            self.assertEqual(status, 503)
             self.assertEqual(headers["Content-Type"], "application/json")
             self.assertEqual(json.loads(body), expected)
+            self.assertNotIn("md", json.loads(body))
 
     def test_after_v2_activation_missing_contest_does_not_fall_back_to_v1(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -256,10 +274,11 @@ class EditorialServerTests(unittest.TestCase):
                 json.loads(body),
                 {
                     "format": None,
+                    "contentKind": "editorial",
                     "html": None,
                     "status": "invalid_structure",
                     "known": False,
-                    "error": "active manifest missing contest",
+                    "error": "active manifest missing editorial",
                 },
             )
 
@@ -313,6 +332,7 @@ class EditorialServerTests(unittest.TestCase):
     def test_invalid_contest_reference_returns_invalid_ref_payload(self):
         expected = {
             "format": None,
+            "contentKind": "editorial",
             "html": None,
             "status": "invalid_ref",
             "known": False,
@@ -364,6 +384,43 @@ class EditorialServerTests(unittest.TestCase):
         self.assertEqual(api_headers["Content-Type"], "application/json")
         self.assertEqual(api_headers["Cache-Control"], "no-store")
         self.assertNotIn("Access-Control-Allow-Origin", api_headers)
+
+
+    def test_editorial_asset_route_serves_digest_validated_image(self):
+        import hashlib
+
+        payload = b"\x89PNG\r\n\x1a\neditorial-server-fixture"
+        digest = hashlib.sha256(payload).hexdigest()
+        pdf_payload = b"%PDF-1.7\neditorial-pdf-must-not-serve"
+        pdf_digest = hashlib.sha256(pdf_payload).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "v2"
+            self.create_active_generation(
+                root,
+                {"1700": ContestStatus.READY},
+                assets={
+                    f"{digest}.png": payload,
+                    f"{pdf_digest}.pdf": pdf_payload,
+                },
+            )
+
+            with patch.object(cfcrawl, "EDITORIAL_DIR", directory):
+                status, headers, body = self.request(
+                    f"/editorial-assets/{digest}.png"
+                )
+                pdf_status, _, _ = self.request(
+                    f"/editorial-assets/{pdf_digest}.pdf"
+                )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "image/png")
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(
+            headers["Cache-Control"],
+            "public, max-age=31536000, immutable",
+        )
+        self.assertEqual(body, payload)
+        self.assertEqual(pdf_status, 404)
 
 
 if __name__ == "__main__":
