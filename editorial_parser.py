@@ -7,20 +7,9 @@ import re
 from urllib.parse import urljoin, urlsplit
 
 from editorial_model import Diagnostic, EditorialDocument, Node
+from content_parser import ParseError, ParseLimits, SourceNode, parse_source_html
 
 
-@dataclass(frozen=True, slots=True)
-class ParseLimits:
-    max_input_bytes: int = 4_000_000
-    max_depth: int = 128
-    max_nodes: int = 100_000
-    max_attributes: int = 32
-    max_text_chars: int = 2_000_000
-    max_recoveries: int = 500
-
-
-class ParseError(ValueError):
-    pass
 
 
 @dataclass(slots=True)
@@ -280,7 +269,7 @@ class _SemanticHTMLParser(HTMLParser):
         elif tag == "div" and "spoiler" in classes:
             node = Node(kind="spoiler", attrs={"title": []})
         elif len(tag) == 2 and tag[0] == "h" and tag[1] in "123456":
-            node = Node(kind="heading", attrs={"level": int(tag[1])})
+            node = Node(kind="heading", attrs={"level": ord(tag[1]) - ord("0")})
         elif tag == "pre":
             node = Node(kind="code_block", text="")
         elif tag == "hr":
@@ -403,6 +392,38 @@ class _SemanticHTMLParser(HTMLParser):
         self.diagnostics.append(Diagnostic("warning", code, message))
 
 
+def _map_source_node(parser: _SemanticHTMLParser, node: SourceNode) -> None:
+    if node.tag == "#text":
+        parser.handle_data(node.text)
+        return
+    parser.handle_starttag(node.tag, list(node.attrs.items()))
+    for child in node.children:
+        _map_source_node(parser, child)
+    if node.tag not in parser._VOID_TAGS:
+        parser.handle_endtag(node.tag)
+
+
+def _parse_semantic_source(
+    html_text: str,
+    *,
+    mode: str,
+    contest_id: str,
+    source_url: str,
+    limits: ParseLimits,
+) -> tuple[Node, list[Diagnostic]]:
+    source_root = parse_source_html(html_text, limits=limits)
+    parser = _SemanticHTMLParser(
+        mode=mode,
+        contest_id=contest_id,
+        source_url=source_url,
+        limits=limits,
+    )
+    for child in source_root.children:
+        _map_source_node(parser, child)
+    parser.close()
+    return parser.finish()
+
+
 class _TutorialHeadingExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=False)
@@ -514,29 +535,23 @@ def _parse_tutorial_parts(
     if not extractor.body_complete:
         raise ParseError("missing-tutorial-body")
 
-    heading_parser = _SemanticHTMLParser(
+    heading_root, heading_diagnostics = _parse_semantic_source(
+        '<div class="ttypography">' + "".join(extractor.parts) + "</div>",
         mode="tutorial-heading",
         contest_id="",
         source_url="https://codeforces.com",
         limits=limits,
     )
-    heading_parser.feed(
-        '<div class="ttypography">' + "".join(extractor.parts) + "</div>"
-    )
-    heading_parser.close()
-    heading_root, heading_diagnostics = heading_parser.finish()
     if len(heading_root.children) != 1 or heading_root.children[0].kind != "heading":
         raise ParseError("invalid-tutorial-heading")
 
-    body_parser = _SemanticHTMLParser(
+    body, body_diagnostics = _parse_semantic_source(
+        "".join(extractor.body_parts),
         mode="tutorial-body",
         contest_id="",
         source_url="https://codeforces.com",
         limits=limits,
     )
-    body_parser.feed("".join(extractor.body_parts))
-    body_parser.close()
-    body, body_diagnostics = body_parser.finish()
     if not body.children:
         raise ParseError("missing-tutorial-body")
     return heading_root.children[0], body, [*heading_diagnostics, *body_diagnostics]
@@ -552,6 +567,15 @@ def _problem_code_from_heading_link(heading: Node) -> str:
     if match is None:
         raise ParseError("invalid-problem-heading-link")
     return match.group(1) + match.group(2)
+
+
+def _heading_level(heading: Node) -> int:
+    value = heading.attrs.get("level")
+    if isinstance(value, int) and not isinstance(value, bool) and value in range(1, 7):
+        return value
+    if isinstance(value, str) and len(value) == 1 and value in "123456":
+        return ord(value) - ord("0")
+    return 6
 
 
 def _source_problem_context(heading: Node) -> tuple[str, int] | None:
@@ -578,7 +602,7 @@ def _source_problem_context(heading: Node) -> tuple[str, int] | None:
     )
     if match is None:
         return None
-    return match.group(1) + match.group(2), int(heading.attrs.get("level", 6))
+    return match.group(1) + match.group(2), _heading_level(heading)
 
 
 def parse_tutorial_fragment(
@@ -651,7 +675,7 @@ def compose_tutorials(
             elif (
                 child.kind == "heading"
                 and context is not None
-                and int(child.attrs.get("level", 6)) <= context[1]
+                and _heading_level(child) <= context[1]
             ):
                 context = None
             children.extend(replace(child, context))
@@ -678,17 +702,13 @@ def parse_blog_html(
     source_url: str,
     limits: ParseLimits = ParseLimits(),
 ) -> EditorialDocument:
-    if len(html_text.encode("utf-8")) > limits.max_input_bytes:
-        raise ParseError("max-input-bytes-exceeded")
-    parser = _SemanticHTMLParser(
+    root, diagnostics = _parse_semantic_source(
+        html_text,
         mode="blog",
         contest_id=contest_id,
         source_url=source_url,
         limits=limits,
     )
-    parser.feed(html_text)
-    parser.close()
-    root, diagnostics = parser.finish()
     return EditorialDocument(
         contest_id=contest_id,
         source_url=source_url,
