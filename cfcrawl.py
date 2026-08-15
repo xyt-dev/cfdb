@@ -20,6 +20,12 @@ from urllib.parse import unquote, urlsplit
 import zlib
 
 import html2md
+from content_assets import (  # pyright: ignore[reportMissingImports]
+    AssetError,
+    AssetFetchResult,
+    AssetPolicy,
+    localize_content_assets,
+)
 from editorial_cache import ContestStatus
 from editorial_model import Diagnostic, EditorialDocument, Node, validate_document
 from editorial_parser import ParseError, compose_tutorials, parse_blog_html, parse_tutorial_fragment  # pyright: ignore[reportAttributeAccessIssue]
@@ -810,117 +816,62 @@ def localize_editorial_assets(
 ) -> EditorialBuildResult:
     image_dir = image_dir or EDITORIAL_IMAGE_DIR
     image_fetcher = image_fetcher or _fetch_editorial_asset
-    localized = copy.deepcopy(document)
-    localized_assets = list(localized.assets)
-    image_number = 0
 
-    class _TransientAssetError(Exception):
-        def __init__(self, diagnostic: Diagnostic) -> None:
-            super().__init__(diagnostic.message)
-            self.diagnostic = diagnostic
-
-    def missing_asset(node: Node, source: str, path: str) -> Node:
-        localized.diagnostics.append(
-            Diagnostic(
-                "warning",
-                "editorial-asset-unsupported",
-                source or "Image source is missing or unsupported",
-                path,
-            )
-        )
-        return Node(kind="missing_asset", attrs={"alt": str(node.attrs.get("alt", ""))})
-
-    def transform(node: Node, path: str) -> Node:
-        nonlocal image_number
-        if node.kind == "image":
-            image_number += 1
-            source = str(node.attrs.get("src", ""))
-            try:
-                parsed_source = urlsplit(source)
-            except ValueError:
-                return missing_asset(node, source, path)
-            extension = os.path.splitext(unquote(parsed_source.path))[1].lower()
-            if extension == ".svg":
-                return missing_asset(node, source, path)
-            if source.startswith("/eimages/") and extension in {
-                ".png", ".jpg", ".jpeg", ".gif", ".webp",
-            }:
-                if source not in localized_assets:
-                    localized_assets.append(source)
-                return node
-            if parsed_source.scheme not in {"http", "https"} or not parsed_source.netloc:
-                return missing_asset(node, source, path)
-            if extension not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-                extension = ".png"
-            try:
-                payload = image_fetcher(source)
-            except Exception:
-                payload = None
-            if not isinstance(payload, bytes) or not payload:
-                raise _TransientAssetError(
-                    Diagnostic(
-                        "error",
-                        "editorial-asset-transient-failure",
-                        source,
-                        path,
-                    )
-                )
-            try:
-                prepared_payload = _prepare_editorial_asset_payload(
-                    payload,
-                    extension,
-                    image_dir,
-                )
-                digest = hashlib.sha256(prepared_payload).hexdigest()
-                name = f"{localized.contest_id}_{image_number}_{digest}{extension}"
-                target = os.path.join(image_dir, name)
-                route = f"/eimages/{name}"
-                _atomic_write_editorial_asset(target, prepared_payload)
-            except OSError:
-                raise _TransientAssetError(
-                    Diagnostic(
-                        "error",
-                        "editorial-asset-write-failed",
-                        source,
-                        path,
-                    )
-                ) from None
-            node.attrs["src"] = route
-            if route not in localized_assets:
-                localized_assets.append(route)
-            return node
-        if node.kind == "spoiler":
-            title = node.attrs.get("title")
-            if isinstance(title, list):
-                localized_title = []
-                for index, value in enumerate(title):
-                    if isinstance(value, dict):
-                        title_node = Node.from_dict(value)
-                        localized_title.append(
-                            transform(title_node, f"{path}/title/{index}").to_dict()
-                        )
-                    else:
-                        localized_title.append(value)
-                node.attrs["title"] = localized_title
-        node.children = [
-            transform(child, f"{path}/{index}")
-            for index, child in enumerate(node.children)
-        ]
-        return node
+    def fetch_asset(source: str) -> AssetFetchResult:
+        try:
+            fetched = image_fetcher(source)
+        except Exception as error:
+            raise AssetError("asset-fetch-failed") from error
+        if isinstance(fetched, AssetFetchResult):
+            return fetched
+        if not isinstance(fetched, bytes) or not fetched:
+            raise AssetError("asset-fetch-failed")
+        if fetched.startswith(b"\x89PNG\r\n\x1a\n"):
+            media_type = "image/png"
+        elif fetched.startswith(b"\xff\xd8\xff"):
+            media_type = "image/jpeg"
+        elif fetched.startswith((b"GIF87a", b"GIF89a")):
+            media_type = "image/gif"
+        elif len(fetched) >= 12 and fetched.startswith(b"RIFF") and fetched[8:12] == b"WEBP":
+            media_type = "image/webp"
+        else:
+            media_type = "application/octet-stream"
+        return AssetFetchResult(fetched, media_type)
 
     try:
-        localized.root = transform(localized.root, "document")
-    except _TransientAssetError as error:
+        localized = localize_content_assets(
+            document,
+            generation_asset_dir=image_dir,
+            route_prefix="/editorial-assets",
+            fetcher=fetch_asset,
+            policy=AssetPolicy(
+                allow_raster=True,
+                allow_pdf_attachment=False,
+                max_bytes=20 * 1024 * 1024,
+            ),
+        )
+    except AssetError as error:
+        diagnostic = Diagnostic(
+            "error",
+            "editorial-asset-transient-failure",
+            str(error),
+            "document",
+        )
         return EditorialBuildResult(
             ContestStatus.TRANSIENT_FAILURE,
             None,
-            {"errors": [error.diagnostic.to_dict()]},
+            {"errors": [diagnostic.to_dict()]},
         )
-    localized.assets = localized_assets
+    if not isinstance(localized, EditorialDocument):
+        return EditorialBuildResult(
+            ContestStatus.INVALID_STRUCTURE,
+            None,
+            {"error": "localized editorial has the wrong content kind"},
+        )
     return EditorialBuildResult(
         ContestStatus.READY,
         localized,
-        {"assets": list(localized_assets)},
+        {"assets": list(localized.assets)},
     )
 
 

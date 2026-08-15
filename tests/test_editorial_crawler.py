@@ -21,10 +21,12 @@ from editorial_cache import (
     load_active_document,
 )
 from editorial_model import EditorialDocument, Node, validate_document
+from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "editorials"
 SOURCE_URL = "https://codeforces.com/blog/entry/103978"
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
 def fixture(relative: str) -> str:
@@ -212,7 +214,7 @@ class EditorialCrawlerTests(unittest.TestCase):
             active_result = localize_editorial_assets(
                 document_with_image(source_url),
                 image_dir=str(image_dir),
-                image_fetcher=lambda _url: b"ACTIVE_IMAGE_A",
+                image_fetcher=lambda _url: PNG_MAGIC + b"ACTIVE_IMAGE_A",
             )
             self.assertIs(active_result.status, ContestStatus.READY)
             assert active_result.document is not None
@@ -223,6 +225,7 @@ class EditorialCrawlerTests(unittest.TestCase):
                 cache_root,
                 "active",
                 ["1700"],
+                EDITORIAL_CODEC,
                 parser_version="parser-1",
                 fixture_version="fixtures-1",
             )
@@ -239,7 +242,7 @@ class EditorialCrawlerTests(unittest.TestCase):
             inactive_result = localize_editorial_assets(
                 document_with_image(source_url),
                 image_dir=str(image_dir),
-                image_fetcher=lambda _url: b"INACTIVE_IMAGE_B",
+                image_fetcher=lambda _url: PNG_MAGIC + b"INACTIVE_IMAGE_B",
             )
             self.assertIs(inactive_result.status, ContestStatus.READY)
             assert inactive_result.document is not None
@@ -249,6 +252,7 @@ class EditorialCrawlerTests(unittest.TestCase):
                 cache_root,
                 "inactive",
                 ["1700", "9999"],
+                EDITORIAL_CODEC,
                 parser_version="parser-1",
                 fixture_version="fixtures-1",
             )
@@ -270,8 +274,8 @@ class EditorialCrawlerTests(unittest.TestCase):
             assert still_active is not None
             self.assertEqual(still_active.root.children[0].attrs["src"], active_route)
             self.assertNotEqual(inactive_route, active_route)
-            self.assertEqual(active_asset.read_bytes(), b"ACTIVE_IMAGE_A")
-            self.assertEqual(inactive_asset.read_bytes(), b"INACTIVE_IMAGE_B")
+            self.assertEqual(active_asset.read_bytes(), PNG_MAGIC + b"ACTIVE_IMAGE_A")
+            self.assertEqual(inactive_asset.read_bytes(), PNG_MAGIC + b"INACTIVE_IMAGE_B")
     def test_localize_assets_rewrites_only_after_atomic_download(self):
         document = document_with_image("https://codeforces.com/images/diagram.png")
 
@@ -281,7 +285,7 @@ class EditorialCrawlerTests(unittest.TestCase):
                 document.root.children[0].attrs["src"],
                 "https://codeforces.com/images/diagram.png",
             )
-            return b"PNG_ASSET_SENTINEL"
+            return PNG_MAGIC + b"PNG_ASSET_SENTINEL"
 
         with tempfile.TemporaryDirectory() as directory:
             result = localize_editorial_assets(
@@ -289,11 +293,11 @@ class EditorialCrawlerTests(unittest.TestCase):
                 image_dir=directory,
                 image_fetcher=fetch_image,
             )
-            digest = hashlib.sha256(b"PNG_ASSET_SENTINEL").hexdigest()
-            route = f"/eimages/1700_1_{digest}.png"
+            digest = hashlib.sha256(PNG_MAGIC + b"PNG_ASSET_SENTINEL").hexdigest()
+            route = f"/editorial-assets/{digest}.png"
             target = Path(directory) / Path(route).name
 
-            self.assertEqual(target.read_bytes(), b"PNG_ASSET_SENTINEL")
+            self.assertEqual(target.read_bytes(), PNG_MAGIC + b"PNG_ASSET_SENTINEL")
             self.assertIs(result.status, ContestStatus.READY)
             assert result.document is not None
             self.assertEqual(result.document.root.children[0].attrs["src"], route)
@@ -308,7 +312,7 @@ class EditorialCrawlerTests(unittest.TestCase):
             blocked = localize_editorial_assets(
                 blocked_document,
                 image_dir=str(blocked_directory),
-                image_fetcher=lambda _url: b"NEVER_VISIBLE",
+                image_fetcher=lambda _url: PNG_MAGIC + b"NEVER_VISIBLE",
             )
 
             self.assertIs(blocked.status, ContestStatus.TRANSIENT_FAILURE)
@@ -319,39 +323,25 @@ class EditorialCrawlerTests(unittest.TestCase):
                 "https://codeforces.com/images/blocked.png",
             )
 
-    def test_preexisting_asset_is_refetched_and_atomically_replaced_before_rewrite(self):
+    def test_preexisting_digest_mismatch_is_not_replaced(self):
         document = document_with_image("https://codeforces.com/images/diagram.png")
 
         with tempfile.TemporaryDirectory() as directory:
-            payload = b"VERIFIED_REPLACEMENT_ASSET"
+            payload = PNG_MAGIC + b"VERIFIED_REPLACEMENT_ASSET"
             digest = hashlib.sha256(payload).hexdigest()
-            name = f"1700_1_{digest}.png"
-            route = f"/eimages/{name}"
+            name = f"{digest}.png"
             target = Path(directory) / name
             target.write_bytes(b"CORRUPT_PREEXISTING_ASSET")
-
-            def fetch_image(url: str) -> bytes:
-                self.assertEqual(url, "https://codeforces.com/images/diagram.png")
-                self.assertEqual(target.read_bytes(), b"CORRUPT_PREEXISTING_ASSET")
-                self.assertEqual(
-                    document.root.children[0].attrs["src"],
-                    "https://codeforces.com/images/diagram.png",
-                )
-                return b"VERIFIED_REPLACEMENT_ASSET"
 
             result = localize_editorial_assets(
                 document,
                 image_dir=directory,
-                image_fetcher=fetch_image,
+                image_fetcher=lambda _url: payload,
             )
 
-            self.assertIs(result.status, ContestStatus.READY)
-            assert result.document is not None
-            self.assertEqual(target.read_bytes(), b"VERIFIED_REPLACEMENT_ASSET")
-            self.assertEqual(
-                result.document.root.children[0].attrs["src"],
-                route,
-            )
+            self.assertIs(result.status, ContestStatus.TRANSIENT_FAILURE)
+            self.assertIsNone(result.document)
+            self.assertEqual(target.read_bytes(), b"CORRUPT_PREEXISTING_ASSET")
             self.assertEqual(
                 sorted(path.name for path in Path(directory).iterdir()),
                 [name],
@@ -518,7 +508,7 @@ class EditorialCrawlerTests(unittest.TestCase):
                 lambda document: localize_editorial_assets(
                     document,
                     image_dir=directory,
-                    image_fetcher=lambda _url: b"ASSET_SENTINEL",
+                    image_fetcher=lambda _url: PNG_MAGIC + b"ASSET_SENTINEL",
                 ),
             )
 
@@ -534,12 +524,12 @@ class EditorialCrawlerTests(unittest.TestCase):
                 title_nodes.append(Node.from_dict(value))
             title_images = [node for title in title_nodes for node in walk(title) if node.kind == "image"]
             all_images = [*title_images, *images]
-            digest = hashlib.sha256(b"ASSET_SENTINEL").hexdigest()
+            digest = hashlib.sha256(PNG_MAGIC + b"ASSET_SENTINEL").hexdigest()
             self.assertEqual(
                 [node.attrs["src"] for node in all_images],
                 [
-                    f"/eimages/1700_1_{digest}.png",
-                    f"/eimages/1700_2_{digest}.webp",
+                    f"/editorial-assets/{digest}.png",
+                    f"/editorial-assets/{digest}.png",
                 ],
             )
             self.assertEqual(validate_document(result.document, ready=True), [])
