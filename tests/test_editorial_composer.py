@@ -52,9 +52,80 @@ class EditorialComposerTests(unittest.TestCase):
         self.assertEqual([node.attrs["problemCode"] for node in problem_sections], self.expected["problemCodes"])
         for problem, sentinel in zip(problem_sections, self.expected["bodySentinels"]):
             self.assertIn(sentinel, plain_text(problem))
+            self.assertEqual(problem.children[0].kind, "heading")
         self.assertEqual(composed.root.children[1].kind, "paragraph")
         self.assertIn(self.expected["creditText"], plain_text(composed.root.children[1]))
         self.assertFalse(any(node.kind == "tutorial_slot" for node in walk(composed.root)))
+
+    def test_nested_tutorial_omits_heading_under_exact_source_problem_context(self):
+        document = parse_blog_html(
+            """
+            <div class="ttypography">
+              <h4><a href="/contest/1369/problem/A">Source problem heading</a></h4>
+              <div class="spoiler">
+                <b class="spoiler-title">Complete Proof</b>
+                <div class="spoiler-content">
+                  <p>SOURCE_PROOF_SENTINEL</p>
+                  <div class="problemTutorial" problemcode="1369A">loading</div>
+                </div>
+              </div>
+            </div>
+            """,
+            contest_id="1369",
+            source_url="https://codeforces.com/blog/entry/81703",
+        )
+        fragment = parse_tutorial_fragment(
+            """
+            <h3><a href="/contest/1369/problem/A">API fragment heading</a></h3>
+            <div class="ttypography">
+              <p>FRAGMENT_BODY_SENTINEL</p>
+              <ul><li>preserved list</li></ul>
+              <pre><code>preserved code</code></pre>
+            </div>
+            """,
+            expected_code="1369A",
+        )
+
+        composed = compose_tutorials(document, tutorials={"1369A": fragment})
+
+        self.assertEqual([node.kind for node in composed.root.children], ["heading", "spoiler"])
+        self.assertEqual(composed.root.children[0], document.root.children[0])
+        spoiler = composed.root.children[1]
+        self.assertEqual(spoiler.attrs["title"][0]["text"], "Complete Proof")
+        section = next(node for node in spoiler.children if node.kind == "problem_section")
+        self.assertEqual(section.attrs, {"problemCode": "1369A"})
+        self.assertEqual(section.children, fragment.children[1:])
+        self.assertNotIn("API fragment heading", plain_text(composed.root))
+        self.assertIn("SOURCE_PROOF_SENTINEL", plain_text(spoiler))
+
+    def test_heading_text_without_exact_problem_link_keeps_fragment_heading(self):
+        document = parse_blog_html(
+            """
+            <div class="ttypography">
+              <h4>1369A - heading text alone</h4>
+              <div class="spoiler">
+                <b class="spoiler-title">Complete Proof</b>
+                <div class="spoiler-content">
+                  <div class="problemTutorial" problemcode="1369A">loading</div>
+                </div>
+              </div>
+            </div>
+            """,
+            contest_id="1369",
+            source_url="https://codeforces.com/blog/entry/81703",
+        )
+        fragment = parse_tutorial_fragment(
+            """
+            <h3><a href="/contest/1369/problem/A">API fragment heading</a></h3>
+            <div class="ttypography"><p>FRAGMENT_BODY_SENTINEL</p></div>
+            """,
+            expected_code="1369A",
+        )
+
+        composed = compose_tutorials(document, tutorials={"1369A": fragment})
+
+        section = next(node for node in walk(composed.root) if node.kind == "problem_section")
+        self.assertEqual(section.children, fragment.children)
 
     def test_fragment_code_must_match_full_expected_code(self):
         with self.assertRaisesRegex(ParseError, "problem-code-mismatch:1700A:1700B"):
