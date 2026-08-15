@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 import editorial_cache
+import content_cache  # pyright: ignore[reportMissingImports]
 
 from editorial_cache import (
     ContestStatus,
@@ -19,6 +20,7 @@ from editorial_cache import (
     load_active_document,
 )
 from editorial_model import EditorialDocument, Node, canonical_json
+from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 
 
 CHECKED_ABSENCE = {
@@ -60,6 +62,7 @@ class EditorialCacheTests(unittest.TestCase):
             root,
             generation_id,
             contests,
+            EDITORIAL_CODEC,
             parser_version="parser-1",
             fixture_version="fixtures-1",
         )
@@ -95,16 +98,17 @@ class EditorialCacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             calls = []
-            original = editorial_cache._fsync_directory
+            original = content_cache._fsync_directory
 
             with RebuildLock(root) as lock, patch(
-                "editorial_cache._fsync_directory",
+                "content_cache._fsync_directory",
                 side_effect=lambda path: (calls.append(Path(path)), original(Path(path)))[1],
             ):
                 GenerationStore.create(
                     root,
                     "g1",
                     ["1700"],
+                    EDITORIAL_CODEC,
                     parser_version="parser-1",
                     fixture_version="fixtures-1",
                     lock=lock,
@@ -333,7 +337,7 @@ class EditorialCacheTests(unittest.TestCase):
             pointer = json.loads((root / "current.json").read_text(encoding="utf-8"))
             self.assertTrue(manifest["finalizedAt"])
             self.assertEqual(
-                manifest["contests"]["1700"]["documentSha256"],
+                manifest["entries"]["1700"]["documentSha256"],
                 hashlib.sha256(document_bytes).hexdigest(),
             )
             self.assertEqual(
@@ -392,6 +396,7 @@ class EditorialCacheTests(unittest.TestCase):
                     root,
                     "g1",
                     ["1700"],
+                    EDITORIAL_CODEC,
                     parser_version="parser-1",
                     fixture_version="fixtures-1",
                     lock=lock,
@@ -409,6 +414,7 @@ class EditorialCacheTests(unittest.TestCase):
                     root,
                     "seeded",
                     ["1700", "2000"],
+                    EDITORIAL_CODEC,
                     parser_version="parser-1",
                     fixture_version="fixtures-1",
                     lock=lock,
@@ -462,22 +468,22 @@ class EditorialCacheTests(unittest.TestCase):
             store.write_manifest()
             manifest_path = store.path / "manifest.json"
             original = json.loads(manifest_path.read_text(encoding="utf-8"))
-            ready = original["contests"]["1700"]
+            ready = original["entries"]["1700"]
             self.assertIn("documentSha256", ready)
 
             variants = []
             for field in ("documentSha256", "updatedAt", "evidence"):
                 variant = json.loads(json.dumps(original))
-                del variant["contests"]["1700"][field]
+                del variant["entries"]["1700"][field]
                 variants.append(variant)
             invalid_timestamp = json.loads(json.dumps(original))
-            invalid_timestamp["contests"]["1700"]["updatedAt"] = "not-a-timestamp"
+            invalid_timestamp["entries"]["1700"]["updatedAt"] = "not-a-timestamp"
             variants.append(invalid_timestamp)
             incomplete_evidence = json.loads(json.dumps(original))
-            del incomplete_evidence["contests"]["9999"]["evidence"]["contestPageReceipts"]
+            del incomplete_evidence["entries"]["9999"]["evidence"]["contestPageReceipts"]
             variants.append(incomplete_evidence)
             extra_status_field = json.loads(json.dumps(original))
-            extra_status_field["contests"]["1700"]["unexpected"] = True
+            extra_status_field["entries"]["1700"]["unexpected"] = True
             variants.append(extra_status_field)
 
             for manifest in variants:
@@ -549,8 +555,8 @@ class EditorialCacheTests(unittest.TestCase):
             )
             self.assertEqual(successor.load_document("1700"), make_document())
             manifest = json.loads((successor.path / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["contests"]["1700"]["status"], "ready")
-            self.assertNotIn("9999", manifest["contests"])
+            self.assertEqual(manifest["entries"]["1700"]["status"], "ready")
+            self.assertNotIn("9999", manifest["entries"])
             self.assertFalse(successor.is_activation_ready())
 
 
