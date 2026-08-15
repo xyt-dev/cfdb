@@ -1,6 +1,6 @@
 # Codeforces Editorial Structure-Preservation Design
 
-**Status:** Approved
+**Status:** Approved — amended for v2-only cutover on 2026-08-15
 
 **Date:** 2026-08-14
 
@@ -8,7 +8,7 @@
 
 cfdb will replace its editorial-only HTML-to-Markdown pipeline with a typed semantic tree that is composed before rendering. Dynamic Codeforces tutorials will be inserted into exact `problemTutorial[problemcode]` slots as parsed subtrees, then rendered as strictly sanitized HTML. Problem statements remain on the current Markdown pipeline.
 
-The migration will create a versioned v2 editorial generation, validate contest 1700 first, fully recrawl every contest editorial, and activate the new generation atomically only after all contests have a terminal valid status.
+The migration creates versioned v2 editorial generations and makes the typed IR path the only editorial runtime. A full source recrawl remains an explicit operator action; it builds an inactive generation and activates it atomically only after all contests have a terminal valid status.
 
 ## User Decisions
 
@@ -17,6 +17,10 @@ The migration will create a versioned v2 editorial generation, validate contest 
 - Existing editorials are rebuilt through a full recrawl.
 - Contest 1700 is the first required live regression check before the full recrawl.
 - The project remains Python-standard-library-only at runtime and in its automated test suite.
+- The original `origin/main` revision is preserved as the `v1` branch.
+- `main` is v2-only code, while `snapshot` contains the same code plus generated data.
+- No server startup, API request, or plain incremental command may trigger an initial full recrawl automatically.
+- Until an explicit full rebuild activates the first generation, editorial API requests fail with HTTP 503 instead of falling back to v1 Markdown.
 
 ## Problem Statement
 
@@ -50,7 +54,7 @@ The current base conversion promotes six author-credit links into headings. Tuto
 3. Preserve nested spoilers, lists, quotes, tables, code blocks, images, and TeX.
 4. Remove text-based heading inference from the v2 editorial path.
 5. Produce deterministic, sanitized HTML suitable for offline rendering.
-6. Keep statements and legacy editorials working during migration.
+6. Keep statements on Markdown while removing legacy editorials from the active runtime.
 7. Make full recrawl activation atomic and reversible.
 8. Distinguish permanent absence, transient failure, and invalid structure.
 9. Verify the parser with deterministic offline fixtures before network validation.
@@ -221,13 +225,20 @@ The renderer:
 
 The renderer must never pass source HTML through unchanged.
 
+## Branch and Deployment Model
+
+- `v1` permanently identifies the original code-only `origin/main` revision before the IR migration.
+- `main` contains only v2 application code, tests, fixtures, and documentation; production crawl data remains ignored.
+- `snapshot` is a descendant of `main` and contains the same code plus the complete generated-data snapshot.
+- V1 is not a runtime fallback. Returning to v1 requires an explicit branch-level deployment rollback.
+- V2 runtime rollback switches only between previously validated v2 generation pointers.
+
 ## Cache and Generation Model
 
 ### Directory layout
 
 ```text
 editorials/
-├── *.md                         # v1, retained for rollback during migration
 ├── images/                      # shared localized assets
 └── v2/
     ├── current.json             # atomic active-generation pointer
@@ -289,14 +300,22 @@ An interprocess lock prevents two rebuilds or activations from running concurren
 
 ## Crawler and CLI Behavior
 
-`update.py` gains actual editorial commands; the documented `--editorials` option currently does not exist in its dispatch logic.
+`update.py` exposes validation, incremental v2 update, and explicit full-rebuild commands; none dispatches to the legacy editorial crawler.
 
 Required commands:
 
 ```text
 python3 update.py --validate-editorial 1700
+python3 update.py --editorials
 python3 update.py --editorials --rebuild
 ```
+
+### `--editorials`
+
+- Requires an existing, valid `editorials/v2/current.json` pointer.
+- Builds and activates an incremental successor generation.
+- If no active pointer exists, exits nonzero with instructions to run the explicit full-rebuild command.
+- Never invokes the legacy Markdown crawler and never upgrades a missing generation into an implicit full recrawl.
 
 ### `--validate-editorial 1700`
 
@@ -315,7 +334,8 @@ python3 update.py --editorials --rebuild
 - Retries transient failures without redoing ready documents in the same generation.
 - Refuses activation while any contest remains `transient_failure` or `invalid_structure`.
 - Activates the complete generation only after validation gates pass.
-- Leaves v1 files and the previously active v2 generation untouched for rollback.
+- Leaves the previously active v2 generation untouched for pointer rollback.
+- Is the only command permitted to create the first complete generation; it is never invoked automatically by the server.
 
 The existing metadata and statement commands retain their behavior.
 
@@ -338,16 +358,27 @@ For v2 content it returns:
 
 For a known-absent editorial it returns a null body with `status: "known_absent"`.
 
-Before any v2 generation is active, the route returns the existing Markdown contract with `format: "markdown"`. After v2 activation, the active manifest is authoritative: `ready` returns v2 HTML and `known_absent` returns a null body; there is no per-contest fallback to v1 Markdown. V1 content is never imported or promoted into v2.
+Before any v2 generation is active, the route returns HTTP 503:
 
-API GET requests do not fetch Codeforces or mutate failure memory. Background update and explicit CLI commands own network crawling.
+```json
+{
+  "format": null,
+  "status": "v2_not_initialized",
+  "error": "editorial v2 is not initialized"
+}
+```
+
+After activation, the active manifest is authoritative: `ready` returns v2 HTML and `known_absent` returns a null body. There is no per-contest or global fallback to v1 Markdown, and v1 content is never imported or promoted into v2.
+
+API GET requests do not fetch Codeforces or mutate failure memory. When the server background updater finds no active pointer, it records the uninitialized state and performs no editorial crawl. Only explicit CLI commands own network crawling, and only explicit `--rebuild` may create the first generation.
 
 ## Frontend Contract
 
-The frontend keeps separate rendering paths:
+The frontend keeps content-type-specific rendering paths:
 
-- Statements and legacy editorials use `mdFrame`.
-- V2 editorials use a new structured-HTML frame path.
+- Statements continue to use the Markdown frame.
+- Editorials accept only the structured-HTML payload path.
+- `v2_not_initialized` is rendered as an explicit service-unavailable message and is never normalized into a missing editorial.
 
 The v2 path:
 
@@ -361,6 +392,10 @@ The v2 path:
 The server-rendered HTML remains sanitized even though the iframe is sandboxed. The sandbox is defense in depth, not the primary sanitizer.
 
 ## Failure and Recovery Policy
+
+### `v2_not_initialized`
+
+Used only when `editorials/v2/current.json` does not exist. The API returns HTTP 503, performs no network or cache mutation, ignores any legacy Markdown files, and instructs the operator to run the explicit full rebuild. This status is not a contest absence and is never cached in a generation.
 
 ### `known_absent`
 
@@ -383,7 +418,7 @@ Used when source HTML exceeds safety limits, no credible editorial island is fou
 
 ### Rollback
 
-Rollback atomically restores the prior `current.json` pointer. V1 Markdown and prior v2 generations are retained until the new generation passes live frontend verification and the user explicitly chooses to clean them up.
+Runtime rollback atomically restores a prior validated v2 `current.json` pointer. V1 is preserved only as the `v1` Git branch and is not consulted by the v2 runtime.
 
 ## Security Requirements
 
@@ -466,7 +501,9 @@ Fixtures are trimmed to the smallest source fragments that preserve the observed
 - Incomplete generations never become current.
 - Pointer rollback restores the previous generation.
 - GET requests perform no network or cache mutation.
-- V2 responses select the HTML path; legacy responses still select Markdown.
+- Editorial responses select only the structured HTML path.
+- A missing active generation returns HTTP 503 `v2_not_initialized` without reading legacy files or crawling.
+- Statements continue to select their independent Markdown path.
 
 ### Live validation gates
 
@@ -490,8 +527,12 @@ Fixtures are trimmed to the smallest source fragments that preserve the observed
 8. Pass offline, security, cache, API, and frontend checks.
 9. Pass live contest-1700 validation.
 10. Pass live 1369 and 1706 spot checks.
-11. Run and activate the full rebuild.
-12. Retain v1 and the previous generation through a rollback window.
+11. Create `v1` at the original `origin/main` revision.
+12. Replace `main` with v2-only code and merge that code into `snapshot` without production data entering `main`.
+13. Remove all legacy editorial runtime routing and update compatibility tests.
+14. Verify HTTP 503 and zero crawler calls when no generation is active.
+15. Stop without rebuilding; an operator later runs and activates the explicit full rebuild.
+16. Retain previous validated v2 generations for pointer rollback.
 
 ## Acceptance Criteria
 
@@ -506,8 +547,12 @@ The work is complete only when all of the following are true:
 - Sanitizer and resource-limit tests pass.
 - All cache and activation writes are atomic.
 - `/api/editorial` performs no network mutation.
+- Without an active generation, `/api/editorial` returns HTTP 503 `v2_not_initialized` and never reads v1 Markdown.
+- Server startup performs no automatic initial editorial rebuild.
+- Plain `--editorials` fails without a pointer; only explicit `--editorials --rebuild` may create the first generation.
 - The full rebuild finishes with no transient or invalid entries before activation.
-- The old generation remains available for rollback.
+- The previous validated v2 generation remains available for rollback.
+- `v1` preserves the original main revision, `main` contains no production data, and `snapshot` remains a full descendant of `main`.
 - README, Chinese README, CLI help, and CHANGELOG describe the implemented behavior exactly.
 
 ## Risks and Mitigations
@@ -526,7 +571,7 @@ Mitigation: inactive generation, per-document atomic writes, resumable ready ent
 
 ### Migration can change frontend behavior
 
-Mitigation: editorials-only feature path, legacy Markdown fallback, sandboxed renderer, live spot checks, and atomic generation rollback.
+Mitigation: explicit HTTP 503 before initialization, sandboxed rendering, live spot checks, atomic v2 generation rollback, and branch-level preservation of the original implementation as `v1`.
 
 ### Generated data is currently changing in the working tree
 
