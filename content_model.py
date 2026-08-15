@@ -107,8 +107,13 @@ class ContentNode:
 
 class SemanticDocument(Protocol):
     schema: int
-    content_kind: str
-    content_id: str
+    @property
+    def content_kind(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def content_id(self) -> str:
+        raise NotImplementedError
     root: ContentNode
     diagnostics: list[Diagnostic]
     assets: list[str]
