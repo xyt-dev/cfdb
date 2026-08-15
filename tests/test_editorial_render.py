@@ -1,14 +1,11 @@
 import unittest
+from importlib import import_module
 from pathlib import Path
 
 from editorial_model import EditorialDocument, Node
 from editorial_parser import parse_blog_html
-from editorial_render import (
-    RenderError,
-    render_editorial_html,
-    sanitize_image_url,
-    sanitize_link_url,
-)
+from content_render import RenderError, sanitize_image_url, sanitize_link_url  # pyright: ignore[reportMissingImports]
+from editorial_render import render_editorial_html
 
 
 def fixture_document(*children: Node) -> EditorialDocument:
@@ -279,6 +276,14 @@ class EditorialRenderTests(unittest.TestCase):
             Node(kind="paragraph", children=[Node(kind="text", text="deterministic")])
         )
         self.assertEqual(render_editorial_html(document), render_editorial_html(document))
+
+    def test_editorial_wrapper_matches_shared_renderer(self):
+        shared_render = import_module("content_render").render_content_html
+        document = fixture_document(
+            Node(kind="paragraph", children=[Node(kind="text", text="shared")])
+        )
+
+        self.assertEqual(render_editorial_html(document), shared_render(document))
 
 
 if __name__ == "__main__":
