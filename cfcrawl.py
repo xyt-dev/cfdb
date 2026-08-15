@@ -1055,47 +1055,107 @@ def _fetch_problem_tutorials(cid: str, codes: list) -> tuple[dict, list]:
     return out, missing
 
 
-def _drop_tutorial_placeholder(md: str, idx: str) -> str:
-    """API 确认无题解（success=="false"，官方未发布）→ 删除该题的占位符。
-    只删占位文本（可能只剩标题壳/空），不整场丢弃其他题"""
-    return re.sub(r'\n*Tutorial is loading\.\.\.\n*', '\n', md, count=1)
+_TUTORIAL_SLOT_PREFIX = "CFDB_TUTORIAL_SLOT_"
+_TUTORIAL_SLOT_DIV_RE = re.compile(
+    r'<div\b(?=[^>]*\bclass\s*=\s*["\'][^"\']*\bproblemTutorial\b[^"\']*["\'])'
+    r'(?=[^>]*\bproblemcode\s*=\s*["\'](?P<code>[^"\']+)["\'])'
+    r'[^>]*>.*?</div\s*>',
+    re.I | re.S,
+)
+_PROBLEM_HEADING_LINK_RE = re.compile(
+    r'\]\(<?(?:https://codeforces\.com)?/contest/(\d+)/problem/([A-Za-z0-9]+)'
+    r'(?:[?#][^>)\s]*)?>?\)',
+    re.I,
+)
 
 
-def _replace_tutorial(md: str, idx: str, tmd: str) -> str:
-    """把该题的 'Tutorial is loading...' 占位替换为真实题解。
-    精确匹配题号（如 A1）；失败则用首字母 fallback（如 problemCode=F3 但标题是 F）"""
-    # 去重：博客原文已有同题号标题（<p><a>1000A - Name</a></p> 转的 h2）时，
-    # tmd 自带的题号标题（h3 补全）会造成双标题（如 1000：原文标题 + tmd 标题）。
-    # 纯占位博客（1004 等无原文标题）保留 tmd 标题。
-    m = re.match(r'^## ([A-Z]?\d{1,4}[A-Z]?)\s*[-—–].*', tmd)
-    if m and re.search(r'^## ' + re.escape(m.group(1)) + r'\b', md, re.M):
-        rest = tmd.split('\n', 1)
-        tmd = rest[1].strip() if len(rest) > 1 else ''
-        if not tmd:
-            return md
-    pat = re.compile(
-        r'(\*\*[^*\n]*' + re.escape(idx) + r'[^*\n]*\*\*)\n+Tutorial is loading\.\.\.',
-        re.S)
-    m = pat.search(md)
-    if not m:
-        letter = idx[0]
-        pat2 = re.compile(
-            r'(\*\*[^*\n]*\b' + re.escape(letter) + r'\b[^*\n]*\*\*)\n+Tutorial is loading\.\.\.',
-            re.S)
-        m = pat2.search(md)
-    if not m:
-        # 2032 等格式：**Tutorial** 小节标题 + 占位
-        pat3 = re.compile(
-            r'(\*\*Tutorial\*\*)\n+Tutorial is loading\.\.\.',
-            re.S)
-        m = pat3.search(md)
-    if m:
-        return md[:m.start()] + m.group(1) + "\n\n" + tmd + md[m.end():]
-    # fallback：无粗体标题的博客（如 1300——占位前没有标题行）→ 直接替换占位符
-    # （按 codes 顺序逐个替换，页面顺序与 codes 一致）
-    if "Tutorial is loading" in md:
-        return md.replace("Tutorial is loading...", tmd, 1)
-    return md
+def _mark_tutorial_slots(blog_html: str) -> tuple[str, list[str]]:
+    """Replace dynamic tutorial divs with exact full-problem-code markers."""
+    codes = []
+
+    def replace_slot(match: re.Match) -> str:
+        code = match.group("code").strip()
+        if not re.fullmatch(r"\d+[A-Za-z][A-Za-z0-9]*", code):
+            return match.group(0)
+        codes.append(code)
+        return f"<p>{_TUTORIAL_SLOT_PREFIX}{code}</p>"
+
+    return _TUTORIAL_SLOT_DIV_RE.sub(replace_slot, blog_html), codes
+
+
+def _markdown_problem_heading_code(line: str) -> str | None:
+    match = _PROBLEM_HEADING_LINK_RE.search(line)
+    if not match:
+        return None
+    return match.group(1) + match.group(2).upper()
+
+
+def _markdown_heading_starts_with_code(line: str, code: str) -> bool:
+    title = re.sub(r"^#{1,6}\s+", "", line).lstrip("[")
+    return bool(re.match(
+        re.escape(code) + r"(?=\s*[-—–:]|\s|$)",
+        title,
+        re.I,
+    ))
+
+
+def _strip_exact_tutorial_heading(tutorial: str, code: str) -> str:
+    match = re.match(r"\s*#{1,6}\s+([^\n]+)\n*", tutorial)
+    if not match:
+        return tutorial.strip()
+    title = match.group(1)
+    if not re.search(
+        r"(?<![A-Za-z0-9])" + re.escape(code) + r"(?![A-Za-z0-9])",
+        title,
+        re.I,
+    ):
+        return tutorial.strip()
+    return tutorial[match.end():].strip()
+
+
+def _drop_tutorial_placeholder(md: str, code: str) -> str:
+    """Drop only the exact full-problem-code slot confirmed missing by the API."""
+    marker = _TUTORIAL_SLOT_PREFIX + code
+    return re.sub(
+        r"\n*[ \t]*" + re.escape(marker) + r"[ \t]*\n*",
+        "\n\n",
+        md,
+        count=1,
+    )
+
+
+def _replace_tutorial(md: str, code: str, tutorial: str) -> str:
+    """Compose one API tutorial into its exact full-problem-code slot."""
+    marker = _TUTORIAL_SLOT_PREFIX + code
+    slot_pattern = re.compile(
+        r"^[ \t]*" + re.escape(marker) + r"[ \t]*$",
+        re.M,
+    )
+    slot = slot_pattern.search(md)
+    if not slot:
+        return md
+
+    source_headings = []
+    detached_headings = []
+    for heading in re.finditer(r"^#{1,6}\s+[^\n]+$", md[:slot.start()], re.M):
+        line = heading.group(0)
+        exact_title = _markdown_heading_starts_with_code(line, code)
+        linked_code = _markdown_problem_heading_code(line)
+        if exact_title or linked_code == code.upper():
+            source_headings.append(heading)
+            if exact_title:
+                detached_headings.append(heading)
+
+    if detached_headings:
+        for heading in reversed(detached_headings):
+            end = heading.end()
+            if end < len(md) and md[end] == "\n":
+                end += 1
+            md = md[:heading.start()] + md[end:]
+    elif source_headings:
+        tutorial = _strip_exact_tutorial_heading(tutorial, code)
+
+    return slot_pattern.sub(lambda _match: tutorial.strip(), md, count=1)
 
 
 def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
@@ -1125,25 +1185,29 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     if "Announcement of Codeforces Round" in blog_html:
         _remember_failed_editorial(f"{cid}@announcement")
         return None
-    # 收集动态加载的 per-problem tutorial 占位
-    codes = []
-    if '<div class="problemTutorial"' in blog_html:
-        codes = re.findall(r'problemcode="([^"]+)"', blog_html)
-    md = html2md.editorial_to_md(blog_html)
-    # md 层替换占位符为真实题解（避免 HTML 层 ttypography 嵌套截断）
-    if codes and "Tutorial is loading" in md:
+
+    # 在 HTML→Markdown 前保留完整 problemCode，避免占位符退化为无身份文本。
+    marked_html, codes = _mark_tutorial_slots(blog_html)
+    md = html2md.editorial_to_md(marked_html)
+    if codes:
         tutorials, missing = _fetch_problem_tutorials(cid, codes)
-        for code, tmd in tutorials.items():
-            idx = code[len(cid):]  # "1970A1" → "A1"
-            md = _replace_tutorial(md, idx, tmd)
-        for code in missing:  # API 确认无题解（官方未发布）→ 删占位，不整场丢弃
-            idx = code[len(cid):]
-            md = _drop_tutorial_placeholder(md, idx)
+        for code in codes:
+            tutorial = tutorials.get(code)
+            if tutorial is not None:
+                md = _replace_tutorial(md, code, tutorial)
+        for code in missing:  # API 确认无题解（官方未发布）→ 只删该完整题号的占位
+            md = _drop_tutorial_placeholder(md, code)
+
     # 全局去重题号标题（根本层兜底——原文标题 + tmd 标题重复只留第一个）
     md = html2md._dedupe_problem_headers(md)
     # 写前校验：错误页/占位残留/过短 = 假题解，不写文件（@temp 可重试）
-    if not md or len(md.strip()) < 100 or "403 Forbidden" in md \
-            or "nginx/" in md or "Tutorial is loading" in md:
+    invalid_content = (
+        "403 Forbidden",
+        "nginx/",
+        "Tutorial is loading",
+        _TUTORIAL_SLOT_PREFIX,
+    )
+    if not md or len(md.strip()) < 100 or any(item in md for item in invalid_content):
         _remember_failed_editorial(f"{cid}@temp")
         return None
     if not md.strip():
@@ -1152,8 +1216,8 @@ def fetch_editorial_md(cid, retries: int = 3, timeout: int = 30) -> str | None:
     try:
         os.makedirs(EDITORIAL_DIR, exist_ok=True)
         # 原链接内嵌 md 首行注释（自包含，无需单独 .url 文件）
-        with open(editorial_path(cid), "w", encoding="utf-8") as f:
-            f.write(f"<!-- url: {link} -->\n{md}")
+        with open(editorial_path(cid), "w", encoding="utf-8") as editorial_file:
+            editorial_file.write(f"<!-- url: {link} -->\n{md}")
     except OSError:
         pass
     return md
