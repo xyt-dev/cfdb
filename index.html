@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/vendor/cf-favicon.png" />
     <title>Codeforces Database — Codeforces Problem Library</title>
-    <script src="/vendor/marked.min.js"></script>
     <script src="/vendor/highlight.min.js"></script>
     <script src="/reader_payload.js"></script>
     <style>
@@ -858,6 +857,8 @@
             "{stage}: {done}/{total} (fetched {fetched}, cached {cached}, failed {failed})",
           detailMeta: "Rating: {r} · Solved: {s} · {tags}",
           readerLoading: "Loading...",
+          v2NotInitialized:
+            "V2 content is not initialized. An explicit rebuild and activation are required.",
           noStatement:
             "Statement not downloaded yet.\n\nThe server auto-crawls on startup (progress bar on top),\nor run: python3 update.py --statements",
           loadFail: "Load failed: ",
@@ -929,6 +930,8 @@
             "{stage}：{done}/{total}（已爬 {fetched}，已有 {cached}，失败 {failed}）",
           detailMeta: "分数: {r} · 解题: {s} · {tags}",
           readerLoading: "加载中...",
+          v2NotInitialized:
+            "V2 内容尚未初始化。必须先显式重建并激活代际。",
           noStatement:
             "这道题还没下载过题面。\n\n服务器启动时会自动预爬全部题目（顶部有进度条），\n也可以手动运行：python3 update.py --statements",
           loadFail: "加载失败：",
@@ -1409,22 +1412,22 @@
           .then((d) => {
             if (seq !== loadSeq) return; // 已切走（tab/题目变了），丢弃过期响应
             reader.replaceChildren();
-            if (!d.md) {
-              const hint = el("div", "hint", t("noStatement"));
+            const payload = CFDBReaderPayload.normalizeApiPayload(d);
+            if (!payload || payload.body == null) {
+              const hint = el(
+                "div",
+                "hint",
+                payload && payload.status === "v2_not_initialized"
+                  ? t("v2NotInitialized")
+                  : t("noStatement"),
+              );
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
               tabCache[tab] = null;
               return;
             }
-            tabCache[tab] = {
-              format: "markdown",
-              body: d.md,
-              url: currentProblem.url,
-              status: "ready",
-              known: true,
-              schema: null,
-            };
-            reader.appendChild(contentFrame(tabCache[tab]));
+            tabCache[tab] = payload;
+            reader.appendChild(contentFrame(payload));
             // 题面底部渲染自己的解题代码（无则跳过，不渲染空框）
             renderSolutions(reader, seq);
           })
@@ -1444,12 +1447,14 @@
             if (seq !== loadSeq) return; // 用户已切回题面/别的题，丢弃过期题解响应
             reader.replaceChildren();
             const payload = CFDBReaderPayload.normalizeApiPayload(d);
-            if (!payload.body) {
-              const hint = el(
-                "div",
-                "hint",
-                payload.known ? t("noEditorialKnown") : t("noEditorialUnknown"),
-              );
+            if (!payload || payload.body == null) {
+              let message = t("noEditorialUnknown");
+              if (payload && payload.status === "v2_not_initialized") {
+                message = t("v2NotInitialized");
+              } else if (payload && payload.known) {
+                message = t("noEditorialKnown");
+              }
+              const hint = el("div", "hint", message);
               hint.style.whiteSpace = "pre-line";
               reader.appendChild(hint);
               return;
@@ -1578,7 +1583,7 @@
           });
       }
 
-      /* ═══ md → iframe（阅读排版，无边框无滚动条，高度自适应）═══ */
+      /* ═══ 结构化 IR HTML → iframe（无边框无滚动条，高度自适应）═══ */
       function themeColors() {
         const cs = getComputedStyle(document.documentElement);
         const pick = (v) => cs.getPropertyValue(v).trim();
@@ -1604,151 +1609,14 @@
       const monoStack =
         '"CodeNewRoman Nerd Font Mono", "JetBrains Mono", "Fira Code", Consolas, monospace';
 
-      /* 题目标题规范化：识别所有题号格式（裸文本/粗体/h1-h4），
-         统一渲染为 h2 + 前后分割线；标题本身链接到原题（titleLink 回调） */
-      function normalizeProblemHeaders(html, url, titleLink) {
-        const wrap = (text) => {
-          const href = titleLink ? titleLink(text.trim()) : null;
-          const inner = href
-            ? `<a class="ptitle" href="${href}" target="_blank" title="${t("openProblem")}">${text}</a>`
-            : text;
-          return `<hr><h2>${inner}</h2><hr>`;
-        };
-        const isProblemTitle = (t) => {
-          const s = t.trim();
-          // 格式1：题号 + 连字符（1900A - xxx / A1 - xxx / 2000A — xxx）
-          if (/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]\s*\S/.test(s)) return true;
-          // 格式2：字母+数字+字母 空格+题名（D2A Submission / D1B Stay / D1C1 Interactive）
-          if (/^[A-Z]\d[A-Z]?\d?\s+\S/.test(s)) return true;
-          return false;
-        };
-        // 顺序：先 h1-h3（wrap 生成的 h2 不会被后续正则二次匹配）
-        html = html.replace(/<h[1-4]>([\s\S]*?)<\/h[1-4]>/g, (m, t) =>
-          isProblemTitle(t) ? wrap(t) : m,
-        );
-        // 再裸文本段落题号（如 1900A - Cover in Water）
-        html = html.replace(
-          /<p>(\d{1,4}[A-Z]?\s*[-—–][\s\S]*?)<\/p>/g,
-          (m, t) => (isProblemTitle(t) ? wrap(t) : m),
-        );
-        // 最后粗体题号（如 **A1 - Balanced Shuffle**）
-        html = html.replace(/<p><strong>([\s\S]*?)<\/strong><\/p>/g, (m, t) =>
-          isProblemTitle(t) ? wrap(t) : m,
-        );
-        return html;
-      }
-
-      /* 保护公式内 markdown 敏感字符：marked 会把 \\ 转义、* 当强调、[] 当链接、
-         _ 当下划线（全部破坏 LaTeX）→ 公式段内统一转 HTML 实体绕过 marked，
-         MathJax 收到原始 LaTeX */
-      function protectMathContent(md) {
-        // 块公式 $$...$$（跨行）或行内公式 $...$：
-        // 开 $ 前不能是 $（防闭 $ 当开 $ 错位配对）、闭 $ 后不能是 $（防连写 $a$$b$ 吞掉）；
-        // 行内内容允许 $ 但不允许换行（换行挡住——长文本/样例块不会被吞进公式段）
-        return md.replace(
-          /(\$\$[\s\S]*?\$\$)|((?<!\$)\$[^\n]*?\$)/g,
-          function (m) {
-            return m
-              .replace(/\\/g, "&#92;")
-              .replace(/\*/g, "&#42;")
-              .replace(/_/g, "&#95;")
-              .replace(/\[/g, "&#91;")
-              .replace(/\]/g, "&#93;")
-              .replace(/\`/g, "&#96;");
-          },
-        );
-      }
-
-      /* 题目标题 → Codeforces 原题链接：
-         ① ALL 按名称匹配（优先带 contestId 约束，处理 D2A/无数字题号）
-         ② 数字解析（1900A → contest/1900/problem/A）
-         ③ 当前题目 contestId 兜底（A1 → contest/当前/contest/problem/A1） */
-      function problemHref(titleText) {
-        try {
-          const t = titleText
-            .replace(/^[A-Z]?\d{1,4}[A-Z]?\s*[-—–]?\s*/, "")
-            .trim();
-          if (!t) return null;
-          const num = (titleText.match(/(\d{3,4})/) || [])[1];
-          if (ALL.length) {
-            const m =
-              (num
-                ? ALL.find((x) => x.name === t && x.contestId === +num)
-                : null) || ALL.find((x) => x.name === t);
-            if (m) {
-              return (
-                "https://codeforces.com/contest/" +
-                m.contestId +
-                "/problem/" +
-                m.index
-              );
-            }
-          }
-          const idx0 = (titleText.match(/^(?:[A-Z]?\d{1,4}|D[12])([A-Z]\d*)/) ||
-            [])[1];
-          if (num && idx0) {
-            return "https://codeforces.com/contest/" + num + "/problem/" + idx0;
-          }
-          if (currentProblem && idx0) {
-            return (
-              "https://codeforces.com/contest/" +
-              currentProblem.contestId +
-              "/problem/" +
-              idx0
-            );
-          }
-        } catch (e) {}
-        return null;
-      }
-
-      function prepareMarkdownHtml(md) {
-        // 下标/上标还原：marked 把单 ~ 当删除线、不解析 ^...^（显示字面）
-        // → 单波浪 ~内容~ 还原 <sub>、单波浪 ^内容^ 还原 <sup>（双波浪 ~~ 真删除线不受影响）
-        // 内容含 markdown 斜体 *x* 一并转 <em>（~*t*-1~ → <sub><em>t</em>-1</sub>）
-        // 代码块/行内代码先占位保护——代码里的 ~/^（位运算等）不被误替换
-        const codeSpans = [];
-        md = md.replace(/```[\s\S]*?```|`[^`\n]*`/g, (m) => {
-          codeSpans.push(m);
-          return "\u0000C" + (codeSpans.length - 1) + "\u0000";
-        });
-        // 公式段也占位保护——$a^k$ 等公式里的 ^（幂）不能被当成上标标记替换
-        const mathSpans = [];
-        md = md.replace(/(\$\$[\s\S]*?\$\$)|((?<!\$)\$[^\n]*?\$)/g, (m) => {
-          mathSpans.push(m);
-          return "\u0000M" + (mathSpans.length - 1) + "\u0000";
-        });
-        md = md.replace(/(?<!~)~([^~\n]+?)~(?!~)/g, (m, inner) => {
-          inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
-          return "<sub>" + inner + "</sub>";
-        });
-        md = md.replace(/(?<!\^)\^([^^\n]+?)\^(?!\^)/g, (m, inner) => {
-          inner = inner.replace(/\*([^*\n]+?)\*/g, "<em>$1</em>");
-          return "<sup>" + inner + "</sup>";
-        });
-        md = md.replace(/\u0000M(\d+)\u0000/g, (m, i) => mathSpans[+i]);
-        md = md.replace(/\u0000C(\d+)\u0000/g, (m, i) => codeSpans[+i]);
-        let html;
-        try {
-          html = window.marked ? marked.parse(protectMathContent(md)) : null;
-        } catch (e) {
-          html = null;
-        }
-        if (!html) html = "<pre>" + md.replace(/</g, "&lt;") + "</pre>";
-        return html;
-      }
 
       function contentFrame(payload) {
         const sourceUrl = CFDBReaderPayload.prepareSourceUrl(
           payload.url || (currentProblem ? currentProblem.url : null),
         );
-        let html = CFDBReaderPayload.prepareBody(
-          payload,
-          prepareMarkdownHtml,
-          (markdownHtml) =>
-            normalizeProblemHeaders(markdownHtml, sourceUrl, problemHref),
-        );
+        let html = CFDBReaderPayload.prepareBody(payload);
         if (html == null) html = "";
-        // srcdoc interpolation must not allow either payload format to close a script element.
+        // srcdoc interpolation must not allow structured content to close a script element.
         html = html.replace(/<\/script/gi, "&lt;/script");
         return htmlFrame(html, sourceUrl);
       }
@@ -1831,10 +1699,37 @@ table { border-collapse:collapse; display:block; max-width:100%; overflow-x:auto
 th,td { border:1px solid ${c.border}; padding:6px 10px; text-align:left; vertical-align:top; }
 th { background:${c.surface}; font-family:${sansStack}; }
 blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px; color:#889; }
+/* ═══ 结构化题面语义角色 ═══ */
+.cf-statement-title { text-align:center; margin:4px 0 18px; }
+.cf-time-limit, .cf-memory-limit, .cf-input-channel, .cf-output-channel {
+  color:${c.subtext}; text-align:center; font:13px/1.7 ${sansStack};
+}
+.cf-statement-body, .cf-input-specification, .cf-output-specification,
+.cf-samples, .cf-note, .cf-interaction, .cf-scoring, .cf-custom-section {
+  margin:18px 0;
+}
+.cf-sample { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; margin:12px 0; }
+.cf-sample-input, .cf-sample-output {
+  min-width:0; border:1px solid ${c.border}; border-radius:8px; background:${c.surface}; padding:10px;
+}
+.cf-sample-input pre, .cf-sample-output pre { margin:0; border:0; padding:8px; background:transparent; }
+.cf-note, .cf-interaction, .cf-scoring {
+  border-left:3px solid ${c.accent}; border-radius:0 8px 8px 0; background:${c.surface}; padding:8px 14px;
+}
+.cf-interaction { border-left-color:${c.r1900}; }
+.cf-scoring { border-left-color:${c.teal}; }
+.cf-attachment {
+  display:inline-flex; align-items:center; gap:6px; margin:12px 0; padding:8px 12px;
+  border:1px solid ${c.border}; border-radius:8px; background:${c.surface};
+  color:${c.accent}; font:700 13px ${sansStack}; text-decoration:none;
+}
+.cf-attachment::after { content:"↗"; font-weight:400; }
+.cf-attachment:hover { background:${c.surface2}; text-decoration:none; }
+@media (max-width:720px) { .cf-sample { grid-template-columns:1fr; } }
 </style>
 <script>MathJax={tex:{inlineMath:[['$','$'],['\\\\\\\\(','\\\\\\\\)']]},startup:{typeset:false}};<\/script>
 <script src="/vendor/tex-svg-full.js"><\/script>
-</head><body>${sourceUrl ? `<div class="topwrap"><a class="open" href="${sourceUrl}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="md">${html}</div>
+</head><body>${sourceUrl ? `<div class="topwrap"><a class="open" href="${sourceUrl}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="content">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
 <script>
 /* 样例/代码框复制按钮：clipboard API（安全上下文）→ execCommand fallback（任何浏览器） */
@@ -1874,14 +1769,6 @@ document.querySelectorAll('pre').forEach(function(pre){
   };
   wrap.appendChild(btn);
 });
-/* 题面属性行（time limit per test: / input: / output: 等带冒号行）居中（CF 风格）；
-   不含 Input/Output 小节标题（无冒号，保持左对齐） */
-document.querySelectorAll('#md > p').forEach(function(p){
-  var s = p.querySelector('strong');
-  if (s && /^(time limit per test|memory limit per test|input|output)\s*:/i.test(s.textContent)) {
-    p.style.textAlign = 'center';
-  }
-});
 /* ═══ iframe 高度自动同步（根本解决）：MutationObserver 监听内容变化，
    折叠展开/图片加载/公式渲染/代码高亮一律触发——不再依赖逐个事件 ═══ */
 var _syncTimer = null;
@@ -1889,7 +1776,7 @@ function scheduleSync() {
   if (_syncTimer) clearTimeout(_syncTimer);
   _syncTimer = setTimeout(syncH, 120); // 防抖：多次变化只同步一次
 }
-new MutationObserver(scheduleSync).observe(document.getElementById('md'), {
+new MutationObserver(scheduleSync).observe(document.getElementById('content'), {
   childList: true,
   subtree: true,
   attributes: true,

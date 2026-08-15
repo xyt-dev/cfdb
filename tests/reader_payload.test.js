@@ -1,56 +1,114 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
 	normalizeApiPayload,
 	prepareBody,
 	prepareSourceUrl,
 } = require("../reader_payload.js");
 
-test("v2 html bypasses markdown parsing and heading normalization", () => {
+test("statement and editorial payloads require structured html", () => {
+	assert.equal(
+		normalizeApiPayload({ format: "markdown", md: "legacy" }),
+		null,
+	);
+	for (const contentKind of ["statement", "editorial"]) {
+		const payload = normalizeApiPayload({
+			format: "html",
+			contentKind,
+			schema: 2,
+			html: `<article>${contentKind}</article>`,
+			url: "https://codeforces.com/blog/entry/1",
+			status: "ready",
+		});
+		assert.deepEqual(payload, {
+			format: "html",
+			contentKind,
+			body: `<article>${contentKind}</article>`,
+			url: "https://codeforces.com/blog/entry/1",
+			status: "ready",
+			known: true,
+			schema: 2,
+		});
+		assert.equal(prepareBody(payload), `<article>${contentKind}</article>`);
+	}
+});
+
+test("ready HTML requires explicit status and preserves empty bodies", () => {
+	assert.equal(
+		normalizeApiPayload({
+			format: "html",
+			contentKind: "statement",
+			html: "<p>x</p>",
+		}),
+		null,
+	);
+	assert.equal(
+		normalizeApiPayload({
+			format: "html",
+			contentKind: "statement",
+			html: "<p>x</p>",
+			status: "",
+		}),
+		null,
+	);
 	const payload = normalizeApiPayload({
 		format: "html",
-		schema: 2,
-		html: "<h4>Official Level</h4>",
-		url: "https://codeforces.com/blog/entry/1",
+		contentKind: "statement",
+		html: "",
 		status: "ready",
 	});
-	const rendered = prepareBody(
-		payload,
-		() => {
-			throw new Error("markdown renderer called");
-		},
-		() => {
-			throw new Error("heading normalizer called");
-		},
-	);
-	assert.equal(rendered, "<h4>Official Level</h4>");
-	assert.equal(payload.schema, 2);
+	assert.equal(payload.body, "");
+	assert.equal(prepareBody(payload), "");
 });
 
-test("legacy markdown still uses both markdown stages", () => {
-	const payload = normalizeApiPayload({
-		format: "markdown",
-		md: "## 1A - A",
-		url: "u",
-	});
-	const rendered = prepareBody(
-		payload,
-		(md) => `<h2>${md}</h2>`,
-		(html) => `<hr>${html}`,
+test("browser keeps initialization status explicit and accepts empty ready bodies", () => {
+	const source = fs.readFileSync(
+		path.join(__dirname, "..", "index.html"),
+		"utf8",
 	);
-	assert.equal(rendered, "<hr><h2>## 1A - A</h2>");
+	assert.equal((source.match(/payload\.body == null/g) || []).length, 2);
+	assert.equal(
+		(
+			source.match(
+				/payload && payload\.status === "v2_not_initialized"/g,
+			) || []
+		).length,
+		2,
+	);
 });
 
-test("known absent normalizes to an empty payload", () => {
+test("v2_not_initialized stays distinct", () => {
+	assert.deepEqual(
+		normalizeApiPayload({
+			contentKind: "statement",
+			status: "v2_not_initialized",
+		}),
+		{
+			format: null,
+			contentKind: "statement",
+			body: null,
+			url: null,
+			status: "v2_not_initialized",
+			known: false,
+			schema: null,
+		},
+	);
+});
+
+test("known absent remains a typed empty payload", () => {
 	assert.deepEqual(
 		normalizeApiPayload({
 			format: null,
+			contentKind: "editorial",
 			html: null,
 			status: "known_absent",
 			known: true,
 		}),
 		{
 			format: null,
+			contentKind: "editorial",
 			body: null,
 			url: null,
 			status: "known_absent",
@@ -60,20 +118,10 @@ test("known absent normalizes to an empty payload", () => {
 	);
 });
 
-test("legacy payloads without a format still normalize as markdown", () => {
-	assert.deepEqual(normalizeApiPayload({ md: "legacy", known: false }), {
-		format: "markdown",
-		body: "legacy",
-		url: null,
-		status: "ready",
-		known: false,
-		schema: null,
-	});
-});
-
-test("invalid structured payloads fail closed", () => {
+test("invalid structured payloads fail closed but keep typed status", () => {
 	const payload = normalizeApiPayload({
 		format: "html",
+		contentKind: "statement",
 		html: null,
 		status: "invalid_structure",
 		known: false,
@@ -81,24 +129,31 @@ test("invalid structured payloads fail closed", () => {
 	});
 	assert.deepEqual(payload, {
 		format: null,
+		contentKind: "statement",
 		body: null,
 		url: null,
 		status: "invalid_structure",
 		known: false,
 		schema: 2,
 	});
+	assert.equal(prepareBody(payload), null);
+});
+
+test("unknown kinds and untyped payloads are rejected", () => {
 	assert.equal(
-		prepareBody(
-			payload,
-			() => {
-				throw new Error("markdown renderer called");
-			},
-			() => {
-				throw new Error("heading normalizer called");
-			},
-		),
+		normalizeApiPayload({
+			format: "html",
+			contentKind: "unknown",
+			html: "<p>x</p>",
+			status: "ready",
+		}),
 		null,
 	);
+	assert.equal(
+		normalizeApiPayload({ format: "html", html: "<p>x</p>" }),
+		null,
+	);
+	assert.equal(normalizeApiPayload({ md: "legacy" }), null);
 });
 
 test("source URLs are strictly validated and escaped for an HTML attribute", () => {
