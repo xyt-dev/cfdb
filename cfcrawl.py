@@ -262,15 +262,16 @@ def _flatten_transparent_png(path: str) -> bool:
 
             def idx_iter(row):
                 if bitdepth == 8:
-                    yield from row
-                    return
-                n = 0
+                    return list(row)
+                indices = []
+                pixel_count = 0
                 for byte in row:
-                    for sh in range(per_byte - 1, -1, -1):
-                        if n >= w:
-                            return  # stride ceil 尾字节多余像素——不越界
-                        yield (byte >> (sh * bitdepth)) & mask
-                        n += 1
+                    for shift in range(per_byte - 1, -1, -1):
+                        if pixel_count >= w:
+                            return indices
+                        indices.append((byte >> (shift * bitdepth)) & mask)
+                        pixel_count += 1
+                return indices
             for row in rows:
                 for idx in idx_iter(row):
                     if idx < ncolors:
@@ -578,13 +579,14 @@ def _tutorial_batch_from_responses(codes, fetch_tutorial) -> TutorialBatch:
             transient_errors.append(f"{code}:invalid-tutorial-response")
             continue
         success = response.get("success")
-        if success is True or success == "true":
+        is_boolean = isinstance(success, bool)
+        if (is_boolean and success) or success == "true":
             fragment = response.get("html")
             if isinstance(fragment, str) and fragment.strip():
                 html_by_code[code] = fragment
             else:
                 transient_errors.append(f"{code}:missing-tutorial-html")
-        elif success is False or success == "false":
+        elif (is_boolean and not success) or success == "false":
             missing_codes.add(code)
         else:
             transient_errors.append(f"{code}:invalid-tutorial-success")
@@ -719,10 +721,11 @@ def _fsync_asset_directory(directory: str) -> None:
     try:
         descriptor = os.open(directory, flags)
     except OSError as error:
-        if error.errno in {errno.EINVAL, errno.ENOTSUP} or (
-            os.name == "nt" and error.errno == errno.EACCES
-        ):
+        if error.errno in {errno.EINVAL, errno.ENOTSUP}:
             return
+        if os.name == "nt":
+            if error.errno == errno.EACCES:
+                return
         raise
     try:
         try:
@@ -741,7 +744,10 @@ def _prepare_editorial_asset_payload(
 ) -> bytes:
     if extension != ".png":
         return payload
-    os.makedirs(directory, exist_ok=True)
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError:
+        raise
     descriptor, temporary = tempfile.mkstemp(
         prefix=".editorial-asset-normalize.",
         suffix=".tmp",
@@ -763,7 +769,10 @@ def _prepare_editorial_asset_payload(
 
 def _atomic_write_editorial_asset(target: str, payload: bytes) -> None:
     directory = os.path.dirname(target)
-    os.makedirs(directory, exist_ok=True)
+    try:
+        os.makedirs(directory, exist_ok=True)
+    except OSError:
+        raise
     try:
         existing = Path(target).read_bytes()
     except FileNotFoundError:
