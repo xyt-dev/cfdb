@@ -17,6 +17,7 @@ from editorial_cache import (
     load_active_document,
 )
 from editorial_model import EditorialDocument, Node
+from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_rebuild import (
     FIXTURE_VERSION,
     LIVE_1700_SENTINELS,
@@ -83,6 +84,7 @@ def create_ready_generation(
         root,
         generation_id,
         contests,
+        EDITORIAL_CODEC,
         parser_version=PARSER_VERSION,
         fixture_version=FIXTURE_VERSION,
     )
@@ -229,7 +231,7 @@ class EditorialRebuildTests(unittest.TestCase):
             store = GenerationStore.open(root, "blocked")
 
             self.assertFalse(report["activated"])
-            self.assertEqual(store.manifest["contests"]["9999"]["status"], "transient_failure")
+            self.assertEqual(store.manifest["entries"]["9999"]["status"], "transient_failure")
             self.assertIsNone(store.manifest["finalizedAt"])
             self.assertFalse((root / "current.json").exists())
 
@@ -261,7 +263,7 @@ class EditorialRebuildTests(unittest.TestCase):
             self.assertEqual(pointer["generationId"], "complete")
             self.assertEqual(store.manifest["counts"]["ready"], 1)
             self.assertEqual(store.manifest["counts"]["known_absent"], 1)
-            evidence = store.manifest["contests"]["9999"]["evidence"]
+            evidence = store.manifest["entries"]["9999"]["evidence"]
             self.assertEqual(evidence["successfulCheckTimestamps"], TIMES[:2])
             self.assertEqual(len(evidence["contestPageReceipts"]), 2)
 
@@ -293,7 +295,7 @@ class EditorialRebuildTests(unittest.TestCase):
                 )
                 store = GenerationStore.open(root, label)
                 self.assertFalse(report["activated"])
-                self.assertEqual(store.manifest["contests"]["9999"]["status"], "transient_failure")
+                self.assertEqual(store.manifest["entries"]["9999"]["status"], "transient_failure")
                 self.assertFalse((root / "current.json").exists())
 
     def test_incremental_successor_seeds_ready_documents_and_rechecks_absence(self):
@@ -320,8 +322,8 @@ class EditorialRebuildTests(unittest.TestCase):
 
             self.assertTrue(report["activated"])
             self.assertEqual(successor.load_document("1700").to_dict(), GenerationStore.open(root, "base").load_document("1700").to_dict())
-            self.assertEqual(successor.manifest["contests"]["9999"]["evidence"]["successfulCheckTimestamps"], TIMES[2:4])
-            self.assertEqual(successor.manifest["contests"]["2000"]["status"], "known_absent")
+            self.assertEqual(successor.manifest["entries"]["9999"]["evidence"]["successfulCheckTimestamps"], TIMES[2:4])
+            self.assertEqual(successor.manifest["entries"]["2000"]["status"], "known_absent")
             self.assertEqual(json.loads((root / "current.json").read_text())["generationId"], "successor")
 
     def test_incremental_recrawls_explicitly_requested_ready_contest(self):
@@ -337,7 +339,7 @@ class EditorialRebuildTests(unittest.TestCase):
             )
             store = GenerationStore.open(root, "requested")
             self.assertFalse(report["activated"])
-            self.assertEqual(store.manifest["contests"]["1700"]["status"], "transient_failure")
+            self.assertEqual(store.manifest["entries"]["1700"]["status"], "transient_failure")
             self.assertEqual(json.loads((root / "current.json").read_text())["generationId"], "base")
 
     def test_stale_incremental_is_never_resumed_after_newer_activation(self):
@@ -479,7 +481,7 @@ class EditorialRebuildTests(unittest.TestCase):
                                         sleep_fn=lambda _delay: None)
             store = GenerationStore.open(root, "resume")
             self.assertTrue(report["activated"])
-            self.assertEqual(store.manifest["contests"]["1700"]["status"], "ready")
+            self.assertEqual(store.manifest["entries"]["1700"]["status"], "ready")
             self.assertEqual((root / "generations" / "resume" / "documents" / "1700.json").read_bytes(), before)
 
     def test_default_full_rebuild_retries_same_inactive_generation(self):
@@ -530,36 +532,61 @@ class EditorialRebuildTests(unittest.TestCase):
         self.assertTrue(args.editorials)
         self.assertTrue(args.rebuild)
 
-    def test_cli_dispatches_all_modes_and_rejects_bare_rebuild(self):
+    def test_cli_dispatches_explicit_modes_and_rejects_ambiguous_rebuilds(self):
         with patch("update.update_metadata", return_value=0) as metadata:
             self.assertEqual(update.main([]), 0)
-            metadata.assert_called_once_with()
-        with patch("update.main_crawl", return_value=0) as statements:
-            self.assertEqual(update.main(["--statements"]), 0)
-            statements.assert_called_once_with()
-        with patch("update.rebuild_editorials", return_value={"activated": True}) as rebuild:
+        metadata.assert_called_once_with()
+
+        with patch(
+            "update.rebuild_editorials",
+            return_value={"activated": True},
+        ) as rebuild, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(update.main(["--editorials", "--rebuild"]), 0)
-            rebuild.assert_called_once_with()
+        rebuild.assert_called_once_with()
+
         with patch("update.validate_editorial", return_value={"ok": True}) as validate:
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(update.main(["--validate-editorial", "1700"]), 0)
-            validate.assert_called_once_with("1700")
-        with contextlib.redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit) as raised:
-                update.main(["--rebuild"])
-        self.assertEqual(raised.exception.code, 2)
+        validate.assert_called_once_with("1700")
 
-    def test_cli_editorials_uses_legacy_before_activation_and_incremental_after(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(cfcrawl, "EDITORIAL_DIR", directory):
-            with patch("update.cfcrawl.fetch_all_editorials", return_value=(2, 1, 1)) as legacy:
+        for argv in (["--rebuild"], ["--statements", "--editorials"]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    update.main(list(argv))
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_plain_editorial_update_without_pointer_does_not_crawl(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            cfcrawl,
+            "EDITORIAL_DIR",
+            directory,
+        ), patch("update.update_editorials") as incremental, patch(
+            "update.rebuild_editorials"
+        ) as rebuild, patch("update.cfcrawl.fetch_all_editorials") as legacy, contextlib.redirect_stderr(
+            io.StringIO()
+        ):
+            self.assertNotEqual(update.main(["--editorials"]), 0)
+
+        incremental.assert_not_called()
+        rebuild.assert_not_called()
+        legacy.assert_not_called()
+
+    def test_plain_editorial_update_with_pointer_dispatches_incremental(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            cfcrawl,
+            "EDITORIAL_DIR",
+            directory,
+        ):
+            root = Path(directory) / "v2"
+            root.mkdir()
+            (root / "current.json").write_text("{}", encoding="utf-8")
+            with patch(
+                "update.update_editorials",
+                return_value={"activated": True},
+            ) as incremental, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(update.main(["--editorials"]), 0)
-                legacy.assert_called_once()
-            v2 = Path(directory) / "v2"
-            v2.mkdir()
-            (v2 / "current.json").write_text("{}", encoding="utf-8")
-            with patch("update.update_editorials", return_value={"activated": True}) as incremental:
-                self.assertEqual(update.main(["--editorials"]), 0)
-                incremental.assert_called_once_with()
+
+        incremental.assert_called_once_with()
 
     def test_help_is_argparse_help(self):
         with contextlib.redirect_stdout(io.StringIO()) as output:
@@ -567,34 +594,177 @@ class EditorialRebuildTests(unittest.TestCase):
                 update.main(["--help"])
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("--validate-editorial", output.getvalue())
+        self.assertIn("--validate-statement", output.getvalue())
         self.assertIn("--editorials", output.getvalue())
+        self.assertIn("--statements", output.getvalue())
 
-    def test_server_background_uses_legacy_then_incremental_and_reports_counts(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(cfcrawl, "EDITORIAL_DIR", directory), patch(
-            "server.subprocess.run"
-        ) as run, patch("server.cfcrawl.fetch_all_statements", return_value=(3, 2, 1)), patch(
-            "server.cfcrawl.fetch_all_editorials", return_value=(2, 1, 1)
-        ) as legacy:
-            run.return_value.returncode = 0
-            run.return_value.stdout = b"ok"
-            run.return_value.stderr = b""
-            server.auto_update()
-            legacy.assert_called_once()
+    def test_server_background_skips_uninitialized_content_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            statement_root = Path(directory) / "statements-v2"
+            editorial_root = Path(directory) / "editorials-v2"
+            with patch.object(server, "STATEMENT_V2_ROOT", statement_root), patch.object(
+                server,
+                "EDITORIAL_V2_ROOT",
+                editorial_root,
+            ), patch("server.subprocess.run") as run, patch(
+                "server.update_statements",
+                create=True,
+            ) as statements, patch("server.update_editorials") as editorials, patch(
+                "server.cfcrawl.fetch_all_statements",
+                side_effect=AssertionError("legacy statement crawl attempted"),
+            ), patch(
+                "server.cfcrawl.fetch_all_editorials",
+                side_effect=AssertionError("legacy editorial crawl attempted"),
+            ):
+                run.return_value.returncode = 0
+                run.return_value.stdout = b"ok"
+                run.return_value.stderr = b""
+                server.auto_update()
+
+            statements.assert_not_called()
+            editorials.assert_not_called()
+            self.assertEqual(
+                server.crawl_state["contentStatus"],
+                {
+                    "statement": "v2_not_initialized",
+                    "editorial": "v2_not_initialized",
+                },
+            )
             self.assertEqual(server.crawl_state["stage"], "done")
 
-            v2 = Path(directory) / "v2"
-            v2.mkdir()
-            (v2 / "current.json").write_text("{}", encoding="utf-8")
-            with patch("server.update_editorials", return_value={
-                "generationId": "next", "counts": {
-                    "ready": 2, "known_absent": 1, "transient_failure": 0,
-                    "invalid_structure": 0, "pending": 0,
-                }, "activated": True,
-            }) as incremental:
+    def test_server_background_updates_active_roots_independently(self):
+        counts = {
+            "ready": 2,
+            "known_absent": 1,
+            "transient_failure": 0,
+            "invalid_structure": 0,
+            "pending": 0,
+        }
+        for statement_active, editorial_active in (
+            (True, False),
+            (False, True),
+            (True, True),
+        ):
+            with self.subTest(
+                statement_active=statement_active,
+                editorial_active=editorial_active,
+            ), tempfile.TemporaryDirectory() as directory:
+                statement_root = Path(directory) / "statements-v2"
+                editorial_root = Path(directory) / "editorials-v2"
+                if statement_active:
+                    statement_root.mkdir()
+                    (statement_root / "current.json").write_text("{}", encoding="utf-8")
+                if editorial_active:
+                    editorial_root.mkdir()
+                    (editorial_root / "current.json").write_text("{}", encoding="utf-8")
+
+                with patch.object(server, "STATEMENT_V2_ROOT", statement_root), patch.object(
+                    server,
+                    "EDITORIAL_V2_ROOT",
+                    editorial_root,
+                ), patch("server.subprocess.run") as run, patch(
+                    "server.update_statements",
+                    create=True,
+                    return_value={
+                        "generationId": "s-next",
+                        "counts": counts,
+                        "activated": True,
+                    },
+                ) as statements, patch(
+                    "server.update_editorials",
+                    return_value={
+                        "generationId": "e-next",
+                        "counts": counts,
+                        "activated": True,
+                    },
+                ) as editorials, patch(
+                    "server.cfcrawl.fetch_all_statements",
+                    side_effect=AssertionError("legacy statement crawl attempted"),
+                ), patch(
+                    "server.cfcrawl.fetch_all_editorials",
+                    side_effect=AssertionError("legacy editorial crawl attempted"),
+                ):
+                    run.return_value.returncode = 0
+                    run.return_value.stdout = b"ok"
+                    run.return_value.stderr = b""
+                    server.auto_update()
+
+                self.assertEqual(statements.call_count, int(statement_active))
+                self.assertEqual(editorials.call_count, int(editorial_active))
+                expected_status = {
+                    "statement": "updated" if statement_active else "v2_not_initialized",
+                    "editorial": "updated" if editorial_active else "v2_not_initialized",
+                }
+                self.assertEqual(server.crawl_state["contentStatus"], expected_status)
+                self.assertEqual(
+                    set(server.crawl_state["generations"]),
+                    {
+                        kind
+                        for kind, active in (
+                            ("statement", statement_active),
+                            ("editorial", editorial_active),
+                        )
+                        if active
+                    },
+                )
+
+
+    def test_server_background_continues_after_statement_update_error(self):
+        counts = {
+            "ready": 1,
+            "known_absent": 0,
+            "transient_failure": 0,
+            "invalid_structure": 0,
+            "pending": 0,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            statement_root = Path(directory) / "statements-v2"
+            editorial_root = Path(directory) / "editorials-v2"
+            for root in (statement_root, editorial_root):
+                root.mkdir()
+                (root / "current.json").write_text("{}", encoding="utf-8")
+
+            with patch.object(server, "STATEMENT_V2_ROOT", statement_root), patch.object(
+                server,
+                "EDITORIAL_V2_ROOT",
+                editorial_root,
+            ), patch("server.subprocess.run") as run, patch(
+                "server.update_statements",
+                side_effect=RuntimeError("statement update failed"),
+            ) as statements, patch(
+                "server.update_editorials",
+                return_value={
+                    "generationId": "e-next",
+                    "counts": counts,
+                    "activated": True,
+                },
+            ) as editorials, patch(
+                "server.cfcrawl.fetch_all_statements",
+                side_effect=AssertionError("legacy statement crawl attempted"),
+            ), patch(
+                "server.cfcrawl.fetch_all_editorials",
+                side_effect=AssertionError("legacy editorial crawl attempted"),
+            ):
+                run.return_value.returncode = 0
+                run.return_value.stdout = b"ok"
+                run.return_value.stderr = b""
                 server.auto_update()
-            incremental.assert_called_once_with()
-            self.assertEqual(server.crawl_state["generationId"], "next")
-            self.assertEqual(server.crawl_state["statusCounts"]["ready"], 2)
+
+            statements.assert_called_once_with()
+            editorials.assert_called_once_with()
+            self.assertEqual(
+                server.crawl_state["contentStatus"],
+                {"statement": "error", "editorial": "updated"},
+            )
+            self.assertEqual(
+                server.crawl_state["generations"]["statement"],
+                {"error": "statement update failed"},
+            )
+            self.assertEqual(
+                server.crawl_state["generations"]["editorial"]["generationId"],
+                "e-next",
+            )
+            self.assertEqual(server.crawl_state["stage"], "done")
 
 
 if __name__ == "__main__":

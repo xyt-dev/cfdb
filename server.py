@@ -16,6 +16,7 @@ import urllib.parse
 import cfcrawl
 from content_cache import ContentStatus, load_active_generation  # pyright: ignore[reportMissingImports]
 from editorial_rebuild import update_editorials
+from statement_rebuild import update_statements  # pyright: ignore[reportMissingImports]
 from editorial_render import render_editorial_html
 from statement_render import render_statement_html  # pyright: ignore[reportMissingImports]
 
@@ -43,64 +44,98 @@ def _on_progress(done, total, cached, fetched, failed):
                        fetched=fetched, failed=failed)
 
 
-def auto_update():
-    """启动后台任务：刷新元数据 → 增量爬缺失题面 → 增量爬缺失题解"""
+def _record_content_update(content_kind: str, report: dict) -> None:
+    counts = report.get("counts")
+    if not isinstance(counts, dict):
+        raise ValueError(f"{content_kind} update report has invalid counts")
+    activated_value = report.get("activated")
+    activated = isinstance(activated_value, bool) and activated_value
+    generation_id = report.get("generationId")
+    crawl_state["contentStatus"][content_kind] = (
+        "updated" if activated else "update_failed"
+    )
+    crawl_state["generations"][content_kind] = {
+        "generationId": generation_id,
+        "statusCounts": dict(counts),
+        "activated": activated,
+    }
+    numeric_counts = [value for value in counts.values() if isinstance(value, int)]
+    crawl_state.update(
+        generationId=generation_id,
+        statusCounts=dict(counts),
+        total=sum(numeric_counts),
+        cached=counts.get("ready", 0),
+        fetched=counts.get("ready", 0),
+        failed=(
+            counts.get("transient_failure", 0)
+            + counts.get("invalid_structure", 0)
+        ),
+    )
+
+
+def _update_active_content(content_kind: str, root: Path, updater) -> None:
+    if not (root / "current.json").is_file():
+        crawl_state["contentStatus"][content_kind] = "v2_not_initialized"
+        print(f"[auto-update] ⏭️ {content_kind} v2 尚未初始化，跳过增量更新")
+        return
+    crawl_state["stage"] = f"{content_kind}s"
+    print(f"[auto-update] 构建增量 v2 {content_kind} 代际...")
     try:
-        crawl_state["stage"] = "meta"
-        r = subprocess.run([sys.executable, os.path.join(ROOT, "update.py")],
-                           capture_output=True, timeout=300)
-        out = (r.stdout + r.stderr).decode("utf-8", "replace").strip()
-        ok = r.returncode == 0
+        report = updater()
+        _record_content_update(content_kind, report)
+    except Exception as error:
+        crawl_state["contentStatus"][content_kind] = "error"
+        crawl_state["generations"][content_kind] = {"error": str(error)}
+        print(f"[auto-update] ⚠️ {content_kind} 增量更新失败: {error}")
+        return
+    counts = crawl_state["generations"][content_kind]["statusCounts"]
+    print(
+        f"[auto-update] ✅ v2 {content_kind} 代际 "
+        f"{report.get('generationId')}: ready {counts.get('ready', 0)} | "
+        f"known_absent {counts.get('known_absent', 0)} | "
+        f"failed {counts.get('transient_failure', 0) + counts.get('invalid_structure', 0)}"
+    )
+
+
+def auto_update():
+    """Refresh metadata, then increment only initialized v2 content roots."""
+    try:
+        crawl_state.clear()
+        crawl_state.update(
+            stage="meta",
+            done=0,
+            total=0,
+            cached=0,
+            fetched=0,
+            failed=0,
+            contentStatus={},
+            generations={},
+        )
+        result = subprocess.run(
+            [sys.executable, os.path.join(ROOT, "update.py")],
+            capture_output=True,
+            timeout=300,
+        )
+        output = (result.stdout + result.stderr).decode("utf-8", "replace").strip()
+        ok = result.returncode == 0
         print(f"[auto-update] {'✅ 元数据已刷新' if ok else '⚠️ 元数据更新失败'}")
-        for line in out.splitlines()[-2:]:
+        for line in output.splitlines()[-2:]:
             print(f"  {line}")
         if not ok:
-            # 元数据失败（多为 CF 封禁/限流）→ 跳过爬取，避免继续触发反爬
-            print("[auto-update] ⏭️ 跳过题面/题解爬取（CF 可能拒绝访问，稍后重启再试）")
+            print("[auto-update] ⏭️ 跳过内容更新（元数据刷新失败）")
             crawl_state["stage"] = "idle"
             return
-        crawl_state["stage"] = "statements"
-        print("[auto-update] 增量爬取缺失题面...")
-        total, cached, fetched = cfcrawl.fetch_all_statements(delay=1.0, on_progress=_on_progress)
-        print(f"[auto-update] ✅ 题面: 共 {total} | 已有 {cached} | 新爬 {fetched}")
 
-        crawl_state["stage"] = "editorials"
-        v2_pointer = os.path.join(cfcrawl.EDITORIAL_DIR, "v2", "current.json")
-        if os.path.isfile(v2_pointer):
-            print("[auto-update] 构建增量 v2 题解代际...")
-            report = update_editorials()
-            counts = report["counts"]
-            crawl_state.update(
-                generationId=report["generationId"],
-                statusCounts=counts,
-                total=sum(counts.values()),
-                cached=counts["ready"],
-                fetched=counts["ready"],
-                failed=counts["transient_failure"] + counts["invalid_structure"],
-            )
-            print(
-                f"[auto-update] ✅ v2 题解代际 {report['generationId']}: "
-                f"ready {counts['ready']} | known_absent {counts['known_absent']} | "
-                f"failed {counts['transient_failure'] + counts['invalid_structure']}"
-            )
-        else:
-            print("[auto-update] 增量爬取缺失题解...")
-            total, cached, fetched = cfcrawl.fetch_all_editorials(
-                delay=1.5,
-                on_progress=_on_progress,
-            )
-            print(
-                f"[auto-update] ✅ 题解: 共 {total} 场比赛 | "
-                f"已有 {cached} | 新爬 {fetched}"
-            )
-
+        _update_active_content("statement", STATEMENT_V2_ROOT, update_statements)
+        _update_active_content("editorial", EDITORIAL_V2_ROOT, update_editorials)
         crawl_state["stage"] = "done"
         print("[auto-update] ✅ 全部完成")
-    except Exception as e:
+    except Exception as error:
         import traceback
+
         crawl_state["stage"] = "error"
-        crawl_state["error"] = str(e)
-        print(f"[auto-update] ⚠️ 异常: {e}", flush=True)
+        crawl_state["error"] = str(error)
+        print(f"[auto-update] ⚠️ 异常: {error}", flush=True)
         traceback.print_exc()
 
 

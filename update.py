@@ -2,6 +2,7 @@
 """Update cfdb metadata, statements, and editorial caches."""
 
 import argparse
+from collections.abc import Mapping
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import sys
 
 import cfcrawl
 from editorial_rebuild import rebuild_editorials, update_editorials, validate_editorial
+from statement_rebuild import rebuild_statements, update_statements, validate_statement
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -123,18 +125,23 @@ def main_crawl() -> int:
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Refresh cfdb metadata or crawl statements/editorials.",
+        description="Refresh cfdb metadata or update v2 content generations.",
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument(
         "--statements",
         action="store_true",
-        help="crawl and cache problem statements",
+        help="incrementally update statements, or rebuild with --rebuild",
     )
     modes.add_argument(
         "--editorials",
         action="store_true",
-        help="update editorials (legacy before v2 activation, incremental afterward)",
+        help="incrementally update editorials, or rebuild with --rebuild",
+    )
+    modes.add_argument(
+        "--validate-statement",
+        metavar="PROBLEM_CODE",
+        help="build and validate one statement without activation",
     )
     modes.add_argument(
         "--validate-editorial",
@@ -144,36 +151,59 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="with --editorials, build a full inactive v2 generation",
+        help="with --statements or --editorials, build a full v2 generation",
     )
     return parser
+
+
+def _report_exit(report: Mapping[str, object], success_key: str) -> int:
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+    success = report.get(success_key)
+    return 0 if isinstance(success, bool) and success else 1
+
+
+def _require_pointer(root: Path, content_kind: str, rebuild_command: str) -> bool:
+    if (root / "current.json").is_file():
+        return True
+    print(
+        f"❌ {content_kind} v2 is not initialized; run: {rebuild_command}",
+        file=sys.stderr,
+    )
+    return False
 
 
 def main(argv=None) -> int:
     parser = build_argument_parser()
     args = parser.parse_args(argv)
-    if args.rebuild and not args.editorials:
-        parser.error("--rebuild requires --editorials")
+    if args.rebuild and not (args.statements or args.editorials):
+        parser.error("--rebuild requires --statements or --editorials")
 
-    if args.statements:
-        return main_crawl()
+    if args.validate_statement is not None:
+        return _report_exit(validate_statement(args.validate_statement), "ok")
     if args.validate_editorial is not None:
-        report = validate_editorial(args.validate_editorial)
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-        return 0 if report.get("ok") is True else 1
+        return _report_exit(validate_editorial(args.validate_editorial), "ok")
+    if args.statements:
+        if args.rebuild:
+            return _report_exit(rebuild_statements(), "activated")
+        root = Path(cfcrawl.STATEMENT_DIR) / "v2"
+        if not _require_pointer(
+            root,
+            "statement",
+            "python3 update.py --statements --rebuild",
+        ):
+            return 1
+        return _report_exit(update_statements(), "activated")
     if args.editorials:
         if args.rebuild:
-            report = rebuild_editorials()
-            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-            return 0 if report.get("activated") is True else 1
-        pointer = Path(cfcrawl.EDITORIAL_DIR) / "v2" / "current.json"
-        if pointer.is_file():
-            report = update_editorials()
-            print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-            return 0 if report.get("activated") is True else 1
-        total, cached, fetched = cfcrawl.fetch_all_editorials(delay=1.5)
-        print(f"✅ 题解: 共 {total} 场比赛 | 已有 {cached} | 新爬 {fetched}")
-        return 0
+            return _report_exit(rebuild_editorials(), "activated")
+        root = Path(cfcrawl.EDITORIAL_DIR) / "v2"
+        if not _require_pointer(
+            root,
+            "editorial",
+            "python3 update.py --editorials --rebuild",
+        ):
+            return 1
+        return _report_exit(update_editorials(), "activated")
     return update_metadata()
 
 
