@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from html import escape
-import re
+from content_asset_policy import asset_identity_from_route  # pyright: ignore[reportMissingImports]
 from urllib.parse import unquote, urlsplit
 
 from content_model import (
@@ -39,12 +39,6 @@ _KNOWN_CODE_LANGUAGES = frozenset(
     }
 )
 _MISSING_ASSET_HTML = '<span class="img-missing">Image unavailable</span>'
-_ALLOWED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-_CONTENT_ADDRESSED_IMAGE_RE = re.compile(
-    r"^/(?:editorial|statement)-assets/[0-9a-f]{64}\.(?:png|jpe?g|gif|webp)$",
-    re.IGNORECASE,
-)
-_STATEMENT_ATTACHMENT_RE = re.compile(r"^/statement-assets/[0-9a-f]{64}\.pdf$")
 _STATEMENT_ROLE_ELEMENTS = {
     "body": ("section", "cf-statement-body"),
     "input_specification": ("section", "cf-input-specification"),
@@ -132,21 +126,20 @@ def sanitize_image_url(
         return None
     if any(part in {".", ".."} for part in decoded_path.split("/")):
         return None
-    if not decoded_path.lower().endswith(_ALLOWED_IMAGE_EXTENSIONS):
-        return None
-
-    if _CONTENT_ADDRESSED_IMAGE_RE.fullmatch(decoded_path):
-        expected_prefix = f"/{content_kind}-assets/"
-        return url if decoded_path.startswith(expected_prefix) else None
-    if content_kind == "editorial" and decoded_path.startswith("/eimages/"):
-        return url
-    if content_kind == "statement" and decoded_path.startswith("/images/"):
-        return url
-    return None
+    identity = asset_identity_from_route(
+        decoded_path,
+        content_kind=content_kind,
+        resource_kind="image",
+    )
+    return url if identity is not None else None
 
 
 def sanitize_attachment_url(value: object) -> str:
-    if not isinstance(value, str) or not _STATEMENT_ATTACHMENT_RE.fullmatch(value):
+    if not isinstance(value, str) or asset_identity_from_route(
+        value,
+        content_kind="statement",
+        resource_kind="attachment",
+    ) is None:
         raise RenderError("unsafe-attachment-url")
     return value
 

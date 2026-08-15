@@ -8,11 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import editorial_cache
 import content_cache  # pyright: ignore[reportMissingImports]
 
-from editorial_cache import (
-    ContestStatus,
+from content_cache import (  # pyright: ignore[reportMissingImports]
+    ContentStatus as ContestStatus,
     GenerationStore,
     RebuildLock,
     activate_generation,
@@ -45,14 +44,17 @@ CHECKED_ABSENCE = {
 }
 
 
-def make_document(contest_id="1700", text="ready"):
+def make_document(contest_id="1700", text="ready", asset_route=None):
+    children = [Node(kind="paragraph", children=[Node(kind="text", text=text)])]
+    assets = []
+    if asset_route is not None:
+        children.append(Node(kind="image", attrs={"src": asset_route, "alt": "diagram"}))
+        assets.append(asset_route)
     return EditorialDocument(
         contest_id=contest_id,
         source_url=f"https://codeforces.com/contest/{contest_id}",
-        root=Node(
-            kind="document",
-            children=[Node(kind="paragraph", children=[Node(kind="text", text=text)])],
-        ),
+        root=Node(kind="document", children=children),
+        assets=assets,
     )
 
 
@@ -225,7 +227,7 @@ class EditorialCacheTests(unittest.TestCase):
             store.write_manifest()
             activate_generation(root, "g1")
 
-            snapshot = editorial_cache.load_active_generation(root)
+            snapshot = content_cache.load_active_generation(root)
             self.assertIsNotNone(snapshot)
             assert snapshot is not None
             self.assertEqual(snapshot.generation_id, "g1")
@@ -234,7 +236,7 @@ class EditorialCacheTests(unittest.TestCase):
             pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
             pointer_path.write_text(json.dumps(pointer, indent=2), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "canonical"):
-                editorial_cache.load_active_generation(root)
+                content_cache.load_active_generation(root)
 
             atomic_write_json(pointer_path, pointer)
             manifest_path = store.path / "manifest.json"
@@ -242,7 +244,26 @@ class EditorialCacheTests(unittest.TestCase):
             manifest["fixtureVersion"] = "changed-but-valid"
             atomic_write_json(manifest_path, manifest)
             with self.assertRaisesRegex(ValueError, "does not match"):
-                editorial_cache.load_active_generation(root)
+                content_cache.load_active_generation(root)
+
+
+    def test_loading_active_snapshot_does_not_repeat_full_content_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self.create_store(root, "g1", ["1700"])
+            self.ready_contest(store, make_document())
+            store.write_manifest()
+            activate_generation(root, "g1")
+
+            with patch.object(
+                GenerationStore,
+                "is_activation_ready",
+                side_effect=AssertionError("full validation repeated"),
+            ):
+                snapshot = content_cache.load_active_generation(root)
+
+            assert snapshot is not None
+            self.assertEqual(snapshot.generation_id, "g1")
 
     def test_failed_atomic_write_leaves_previous_document_visible(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -264,7 +285,7 @@ class EditorialCacheTests(unittest.TestCase):
                 self.assertEqual(marker["pid"], os.getpid())
                 self.assertTrue(marker["processStart"])
                 code = (
-                    "from editorial_cache import RebuildLock\n"
+                    "from content_cache import RebuildLock\n"
                     "from pathlib import Path\n"
                     "import sys\n"
                     "try:\n"
@@ -530,11 +551,18 @@ class EditorialCacheTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         load_active_document(root, "1700")
 
-    def test_seed_successor_hardlinks_or_copies_ready_documents(self):
+    def test_seed_successor_hardlinks_or_copies_ready_documents_and_assets(self):
+        payload = b"\x89PNG\r\n\x1a\nSEEDED_ASSET"
+        name = hashlib.sha256(payload).hexdigest() + ".png"
+        route = f"/editorial-assets/{name}"
+        document = make_document(asset_route=route)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             active = self.create_store(root, "g1", ["1700", "9999"])
-            self.ready_contest(active, make_document())
+            asset_directory = active.path / "assets"
+            asset_directory.mkdir()
+            (asset_directory / name).write_bytes(payload)
+            self.ready_contest(active, document)
             active.set_status(
                 "9999",
                 ContestStatus.KNOWN_ABSENT,
@@ -548,16 +576,47 @@ class EditorialCacheTests(unittest.TestCase):
 
             source = active.path / "documents" / "1700.json"
             seeded = successor.path / "documents" / "1700.json"
+            source_asset = active.path / "assets" / name
+            seeded_asset = successor.path / "assets" / name
             self.assertEqual(seeded.read_bytes(), source.read_bytes())
             self.assertTrue(
                 os.stat(seeded).st_ino == os.stat(source).st_ino
                 or seeded.read_bytes() == source.read_bytes()
             )
-            self.assertEqual(successor.load_document("1700"), make_document())
+            self.assertEqual(seeded_asset.read_bytes(), source_asset.read_bytes())
+            self.assertTrue(
+                os.stat(seeded_asset).st_ino == os.stat(source_asset).st_ino
+                or seeded_asset.read_bytes() == source_asset.read_bytes()
+            )
+            self.assertEqual(successor.load_document("1700"), document)
             manifest = json.loads((successor.path / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["entries"]["1700"]["status"], "ready")
             self.assertNotIn("9999", manifest["entries"])
             self.assertFalse(successor.is_activation_ready())
+
+    def test_activation_rejects_missing_digest_mismatched_or_invalid_magic_assets(self):
+        good_payload = b"\x89PNG\r\n\x1a\nGOOD_ASSET"
+        cases = (
+            ("missing", good_payload, None),
+            ("digest-mismatch", good_payload, b"\x89PNG\r\n\x1a\nOTHER_ASSET"),
+            ("invalid-magic", b"not-a-png", b"not-a-png"),
+        )
+        for label, named_payload, stored_payload in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                name = hashlib.sha256(named_payload).hexdigest() + ".png"
+                route = f"/editorial-assets/{name}"
+                store = self.create_store(root, "g1", ["1700"])
+                if stored_payload is not None:
+                    asset_directory = store.path / "assets"
+                    asset_directory.mkdir()
+                    (asset_directory / name).write_bytes(stored_payload)
+                self.ready_contest(store, make_document(asset_route=route))
+                store.write_manifest()
+
+                self.assertIsNone(store.manifest["finalizedAt"])
+                with self.assertRaisesRegex(ValueError, "activation-ready"):
+                    activate_generation(root, "g1")
 
 
 if __name__ == "__main__":

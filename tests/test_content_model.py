@@ -68,5 +68,43 @@ class ContentModelTests(unittest.TestCase):
         self.assertEqual([error.code for error in errors], ["invalid-attachment-content-kind"])
 
 
+    def test_ready_images_require_content_addressed_kind_routes(self):
+        digest = "a" * 64
+        for content_kind, source in (
+            ("editorial", f"/editorial-assets/{digest}.png"),
+            ("statement", f"/statement-assets/{digest}.webp"),
+        ):
+            with self.subTest(content_kind=content_kind, source=source):
+                root = ContentNode(kind="document", children=[ContentNode(kind="image", attrs={"src": source})])
+                self.assertEqual(
+                    validate_content_tree(
+                        root,
+                        diagnostics=[],
+                        assets=[],
+                        ready=True,
+                        content_kind=content_kind,
+                    ),
+                    [],
+                )
+
+        for content_kind, source in (
+            ("editorial", "/eimages/legacy.png"),
+            ("statement", "/images/legacy.png"),
+        ):
+            with self.subTest(content_kind=content_kind, source=source):
+                root = ContentNode(kind="document", children=[ContentNode(kind="image", attrs={"src": source})])
+                errors = validate_content_tree(
+                    root,
+                    diagnostics=[],
+                    assets=[],
+                    ready=True,
+                    content_kind=content_kind,
+                )
+                self.assertEqual(
+                    [error.code for error in errors],
+                    ["remote-image-in-ready-document"],
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

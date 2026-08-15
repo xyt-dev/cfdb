@@ -9,11 +9,11 @@
 ## 功能
 
 - **全量题目元数据** — Codeforces API 提供的 11k+ 道题（rating 800–3500、标签、解题数）存入 `problems.json`。
-- **题面路径不变** — 题面继续以 Markdown 存入 `statements/`，图片本地化并由本地 MathJax 渲染公式。
-- **结构化题解 v2** — 题解解析为带类型的语义树，以规范 JSON 保存，再渲染为经过净化的 HTML。源码顺序、标题层级、嵌套 spoiler/列表/引用/表格、代码空白、图片和 TeX 与 Codeforces 保持语义一致。
+- **结构化题面 v2** — 当前题面 DOM 或权威 PDF 转为带类型的规范 JSON；HTML 题面按语义渲染，PDF 保持为不可变本地附件。
+- **结构化题解 v2** — 题解转为带类型的规范 JSON 与确定性净化 HTML，同时保留源码顺序、标题层级、嵌套 spoiler/列表/引用/表格、代码空白、图片和 TeX。
 - **按完整题号精确组合动态 tutorial** — 每个完整 `problemTutorial` 片段（含官方标题）只替换完整 Codeforces 题号完全相同的 slot。1700 按 A 标题/正文到 F 标题/正文组合，不使用首字母、顺序或文本推断兜底。
-- **原子重建** — 文档和 manifest 先写入非活动代际；只有每场比赛均为 `ready` 或 `known_absent` 时，全量重建才通过一次原子指针替换激活。旧代际和 v1 Markdown 保留用于回滚。
-- **只读题解 API** — `GET /api/editorial` 不抓取 Codeforces，也不修改缓存或失败记忆。v2 激活前返回旧 Markdown；激活后以 v2 manifest 为唯一依据，ready 文档返回净化 HTML。
+- **独立原子代际** — 题面与题解分别拥有 manifest、指针、重建、激活、回滚和历史；只有完整且验证通过的代际会激活。
+- **只读 v2 API** — 题面与题解 GET 请求均无网络、无写入；缺少指针时返回 HTTP 503，运行时绝不读取或提供旧版 Markdown。
 - **本地网页**（`index.html` 单文件）— 筛选、排序、题面/题解 tab、本地解题代码、中英切换、双主题、离线 MathJax/高亮与复制按钮。
 - **纵深防御** — 源 HTML 经过允许列表解析和渲染；结构化阅读器使用 `sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"`，禁止 `allow-same-origin`。
 - **零 CDN、局域网就绪** — 浏览器资源全部 vendored，本地服务默认绑定 `0.0.0.0`，无鉴权。
@@ -36,47 +36,50 @@ git clone -b snapshot https://github.com/xyt-dev/cfdb.git
 
 端口覆盖：`CFDB_PORT=9000 python3 server.py`
 
-## 更新与题解运维
+## 更新与内容运维
 
 ```bash
 python3 update.py                              # 刷新 problems.json 元数据
-python3 update.py --statements                 # 全量预爬 Markdown 题面
-python3 update.py --validate-editorial 1700    # 在线构建/渲染验证，不激活
-python3 update.py --editorials                 # v2 前爬旧版；v2 后建增量后继代际
-python3 update.py --editorials --rebuild       # 可续跑的 v2 全量重建
+python3 update.py --validate-statement 1700A  # 验证单道题面，不激活
+python3 update.py --validate-editorial 1700    # 验证单场题解，不激活
+python3 update.py --statements --rebuild       # 显式全量重建题面代际
+python3 update.py --editorials --rebuild       # 显式全量重建题解代际
+python3 update.py --statements                 # 生成题面增量后继代际
+python3 update.py --editorials                 # 生成题解增量后继代际
 ```
 
-`--validate-editorial` 使用临时本地图片目录，不改变活动代际。全量重建忽略 v1 缓存命中和失败记忆，按有界批次写入非活动代际，可续跑兼容的未完成全量代际；只要有比赛尚未达到终态，就不激活并以非零状态退出。v2 激活后，单独运行 `--editorials` 会从当前活动代际生成新后继，重新检查已知无题解和新增比赛，并且仅在完整时激活。
+只有显式 `--rebuild` 可以创建首个代际。普通题面或题解增量命令要求各自存在活动 `current.json` 指针；对应内容根尚未初始化时以非零状态退出。服务器启动遵循同一规则：两个内容根独立增量更新，缺少指针的根会被跳过，不会隐式启动内容爬取。
+
+两种验证模式都使用临时本地资源且绝不激活代际。全量重建按有界批次写入非活动代际，只在完整且验证通过时激活。增量命令从各自活动代际播种后继；题面与题解独立激活、回滚并保留历史。
 
 ### 状态含义
 
-- `ready` — 语义文档已验证，不含未解析 tutorial slot 或远程图片依赖。
-- `known_absent` — 两次成功且可识别的比赛页面检查都未发现 editorial/tutorial 链接；每次新重建都会复查。
-- `transient_failure` — 可重试的网络、限流、CSRF、响应或图片失败；阻止激活。
-- `invalid_structure` — 解析、完整题号组合或语义验证失败；阻止激活。
+- `ready` — 语义文档已验证，且所有资源均为本地资源。
+- `known_absent` — 按对应来源策略完成权威检查并确认内容不存在。
+- `transient_failure` — 可重试的网络、限流、响应或资源失败；阻止激活。
+- `invalid_structure` — 解析、精确身份组合或语义验证失败；阻止激活。
 
 ### 缓存布局与回滚
 
 ```text
-editorials/
-├── *.md                              # 保留的旧版 v1 Markdown
-├── images/                           # 共享的本地题解图片
-└── v2/
-    ├── current.json                  # 原子活动代际指针
-    └── generations/<generation-id>/
-        ├── manifest.json             # 比赛集合、状态、回执与摘要
-        └── documents/<contestId>.json # 规范 schema-2 语义树
+statements/v2/                         editorials/v2/
+├── current.json                       ├── current.json
+└── generations/<generation-id>/       └── generations/<generation-id>/
+    ├── manifest.json                      ├── manifest.json
+    ├── documents/<problemCode>.json       ├── documents/<contestId>.json
+    └── assets/<sha256>.<ext>               └── assets/<sha256>.<ext>
 ```
 
-渲染 HTML 从规范 JSON 派生并由 `/api/editorial` 返回，不把源 HTML 写入缓存。当 `current.json` 记录了上一代际时，可原子重新激活它以回滚：
+规范 JSON 是缓存的唯一内容真源；渲染 HTML 在读取时派生，不作为规范内容存储。已完成代际和内容寻址资源不可变。当 `current.json` 记录上一代际时，可用通用缓存 API 原子重新激活对应根：
 
 ```bash
 python3 - <<'PY'
 import json
-from editorial_cache import activate_generation
-with open("editorials/v2/current.json", encoding="utf-8") as source:
+from content_cache import activate_generation
+root = "editorials/v2"
+with open(f"{root}/current.json", encoding="utf-8") as source:
     previous = json.load(source)["previousGenerationId"]
-activate_generation("editorials/v2", previous)
+activate_generation(root, previous)
 PY
 ```
 
@@ -84,22 +87,22 @@ PY
 
 ## API 与阅读器行为
 
-活动 v2 内容的 `GET /api/editorial?contestId=1700` 返回 `format: "html"`、`schema: 2`、净化后的 `html`、Codeforces `url`、`known: true` 与 `status: "ready"`。确认无题解时返回空正文和 `status: "known_absent"`。没有任何 v2 指针前继续提供原有 `format: "markdown"` 响应；激活后不会逐比赛回退到 v1。
+`GET /api/statement?contestId=1700&index=A` 与 `GET /api/editorial?contestId=1700` 只提供 v2 内容。就绪响应包含 `format: "html"`、`contentKind`、`schema: 2`、净化后的 `html`、精确 Codeforces `url` 与 `status: "ready"`。确认不存在时返回空正文和 `status: "known_absent"`。
 
-题面和旧版题解继续使用 Markdown 阅读路径。v2 HTML 绕过 Markdown 解析与标题归一化，再复用本地 MathJax、语法高亮、复制按钮、图片诊断、外链处理和 iframe 高度同步。
+某个内容根没有活动指针时，对应接口返回 HTTP 503 与 `status: "v2_not_initialized"`。运行时不存在 Markdown、请求期爬取或逐项旧版回退。阅读器把服务器渲染的 HTML 直接送入沙箱 iframe，在保留语义层级的同时复用本地 MathJax、语法高亮、复制控件、图片诊断和高度同步。仅 PDF 的题面以不可变本地附件链接在新浏览上下文中打开。
 
 ## 开发验证
 
-Node.js 仅为可选的无依赖阅读器开发测试工具，不是运行依赖：
+Node.js 仅为可选的无依赖阅读器开发测试工具：
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --test tests/reader_payload.test.js
-python3 -m py_compile editorial_model.py editorial_parser.py editorial_render.py editorial_cache.py editorial_rebuild.py cfcrawl.py server.py update.py
+python3 -m py_compile content_model.py content_parser.py content_render.py content_cache.py content_codecs.py statement_model.py statement_parser.py statement_crawl.py statement_rebuild.py editorial_model.py editorial_parser.py editorial_rebuild.py cfcrawl.py server.py update.py
 ```
 
 ## 说明
 
 - Codeforces 临时封禁 IP 时，当前活动本地数据仍可用；网络更新失败不会替换活动代际。
-- 生成数据（`problems.json`、题面、题解、图片和失败记忆）属于快照/数据工作流，不应混入普通代码提交。
+- 生成的元数据与 v2 代际/资源属于快照数据工作流，不应混入普通代码提交。旧版 v1 文件可作为惰性历史数据保留在快照中，但绝不是运行时输入。
 - 完整历史见 [CHANGELOG.md](CHANGELOG.md)。

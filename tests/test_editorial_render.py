@@ -128,56 +128,61 @@ class EditorialRenderTests(unittest.TestCase):
                 self.assertEqual(sanitize_link_url(value), expected)
 
     def test_retains_only_safe_local_raster_images_and_escapes_alt(self):
+        route = "/editorial-assets/" + "a" * 64 + ".png"
         document = fixture_document(
-            Node(kind="image", attrs={"src": "/eimages/1.png", "alt": 'x" <y>'})
+            Node(kind="image", attrs={"src": route, "alt": 'x" <y>'})
         )
         self.assertEqual(
             render_editorial_html(document),
-            '<img src="/eimages/1.png" alt="x&quot; &lt;y&gt;">',
+            f'<img src="{route}" alt="x&quot; &lt;y&gt;">',
         )
-        self.assertEqual(sanitize_image_url("/eimages/1.png"), "/eimages/1.png")
+        self.assertEqual(sanitize_image_url(route), route)
 
-    def test_image_sanitizer_allows_only_approved_raster_extensions(self):
+    def test_image_sanitizer_allows_only_canonical_lowercase_raster_extensions(self):
+        prefix = "/editorial-assets/" + "a" * 64
         cases = {
-            "/eimages/a.png": "/eimages/a.png",
-            "/eimages/a.JPG": "/eimages/a.JPG",
-            "/eimages/a.jpeg": "/eimages/a.jpeg",
-            "/eimages/a.GIF": "/eimages/a.GIF",
-            "/eimages/a.webp": "/eimages/a.webp",
-            "/eimages/extensionless": None,
-            "/eimages/file.html": None,
-            "/eimages/file.svg": None,
-            "/eimages/file.bmp": None,
+            f"{prefix}.png": f"{prefix}.png",
+            f"{prefix}.JPG": None,
+            f"{prefix}.jpeg": f"{prefix}.jpeg",
+            f"{prefix}.GIF": None,
+            f"{prefix}.webp": f"{prefix}.webp",
+            "/editorial-assets/" + "A" * 64 + ".png": None,
+            prefix: None,
+            f"{prefix}.html": None,
+            f"{prefix}.svg": None,
+            f"{prefix}.bmp": None,
         }
         for value, expected in cases.items():
             with self.subTest(value=value):
                 self.assertEqual(sanitize_image_url(value), expected)
 
     def test_image_sanitizer_rejects_remote_non_asset_and_svg_urls(self):
+        digest = "a" * 64
         for value in (
             "https://codeforces.com/1.png",
             "/images/1.png",
-            "/eimages/vector.svg",
-            "/eimages/vector.SVG?x=1",
-            "/eimages/vector%2esvg",
-            "/eimages/%2e%2e/secret.png",
-            "//codeforces.com/eimages/1.png",
-            " /eimages/1.png",
+            "/eimages/1.png",
+            f"/statement-assets/{digest}.png",
+            f"/editorial-assets/{digest}.svg",
+            f"/editorial-assets/{digest}.SVG?x=1",
+            f"/editorial-assets/{digest}%2esvg",
+            "/editorial-assets/%2e%2e/secret.png",
+            f"//codeforces.com/editorial-assets/{digest}.png",
+            f" /editorial-assets/{digest}.png",
         ):
             with self.subTest(value=value):
                 self.assertIsNone(sanitize_image_url(value))
 
-    def test_missing_asset_and_rejected_svg_emit_placeholder(self):
+    def test_missing_asset_placeholder_and_rejected_svg_fails_closed(self):
         self.assertEqual(
             render_editorial_html(fixture_document(Node(kind="missing_asset"))),
             '<span class="img-missing">Image unavailable</span>',
         )
-        self.assertEqual(
+        route = "/editorial-assets/" + "a" * 64 + ".svg"
+        with self.assertRaisesRegex(RenderError, "remote-image-in-ready-document"):
             render_editorial_html(
-                fixture_document(Node(kind="image", attrs={"src": "/eimages/vector.svg", "alt": "vector"}))
-            ),
-            '<span class="img-missing">Image unavailable</span>',
-        )
+                fixture_document(Node(kind="image", attrs={"src": route, "alt": "vector"}))
+            )
 
     def test_ready_validation_rejects_remote_image(self):
         document = fixture_document(
