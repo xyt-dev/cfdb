@@ -1,0 +1,46 @@
+{
+  "fixtures": [
+    {
+      "path": "normal.html",
+      "sha256": "e70232fef2f66e23822a1a45e62787c94b5d5c314968f9a8c81d10f84763a915",
+      "encoding": "utf-8",
+      "newline": "lf",
+      "rationale": "normal-metadata-sections-samples"
+    },
+    {
+      "path": "interaction.html",
+      "sha256": "aefa49b3fda08706ff922328a599f55a1be73ce89ca96468ff6f3b77c8b41dda",
+      "encoding": "utf-8",
+      "newline": "lf",
+      "rationale": "interaction-scoring-custom-sections"
+    },
+    {
+      "path": "localized.html",
+      "sha256": "36ab94498a8b69672361f3cdc74a678554139f4444b7b5df9753630b5655e049",
+      "encoding": "utf-8",
+      "newline": "lf",
+      "rationale": "localized-structural-roles-compound-index"
+    },
+    {
+      "path": "malformed.html",
+      "sha256": "c0c83fd843f7f3467e72b7ec7063f60c4e30800a195bcdec6f435b3c0dee144f",
+      "encoding": "utf-8",
+      "newline": "lf",
+      "rationale": "recoverable-malformed-dom"
+    },
+    {
+      "path": "unsafe.html",
+      "sha256": "84c6e9fd1002f1d5b9c6de04cf16c3501f453a47fb13f677252d2a62fc614b42",
+      "encoding": "utf-8",
+      "newline": "lf",
+      "rationale": "unsafe-elements-and-attributes"
+    },
+    {
+      "path": "expected.json",
+      "sha256": "425edf4338d1f7f8d9cb71b4d1110459754634de2a15f9387089715bf50cdfd9",
+      "encoding": "utf-8",
+      "newline": "lf",
+      "rationale": "semantic-expectations"
+    }
+  ]
+}

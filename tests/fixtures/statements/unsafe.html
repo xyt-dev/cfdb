@@ -1,0 +1,11 @@
+<div class="problem-statement" onclick="attack()">
+  <div class="header"><div class="title">D. Safe Rendering Source</div></div>
+  <div class="problem-description" onmouseover="attack()">
+    <p>Safe text <a href="javascript:attack()" onclick="attack()">unsafe link text</a>.</p>
+    <script>SCRIPT_TEXT_MUST_NOT_SURVIVE</script>
+    <style>STYLE_TEXT_MUST_NOT_SURVIVE</style>
+    <iframe src="https://example.invalid/attack">FRAME_TEXT_MUST_NOT_SURVIVE</iframe>
+    <img src="javascript:attack()" onerror="attack()" alt="unsafe image">
+    <a href="https://codeforces.com/">safe link</a>
+  </div>
+</div>

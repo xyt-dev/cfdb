@@ -1,0 +1,33 @@
+{
+  "normal": {
+    "problemCode": "1700A",
+    "roles": [
+      "title",
+      "time_limit",
+      "memory_limit",
+      "input_channel",
+      "output_channel",
+      "body",
+      "input_specification",
+      "output_specification",
+      "samples",
+      "sample",
+      "sample_input",
+      "sample_output",
+      "sample",
+      "sample_input",
+      "sample_output",
+      "note"
+    ],
+    "sampleInputText": ["1 2\n", "4 5\n"],
+    "sampleOutputText": ["3\n", "9\n"]
+  },
+  "interaction": {
+    "roles": ["title", "time_limit", "memory_limit", "input_channel", "output_channel", "body", "interaction", "scoring", "custom"],
+    "customTitle": "Synthetic Constraints"
+  },
+  "localized": {
+    "problemCode": "1970A1",
+    "roles": ["title", "time_limit", "memory_limit", "input_channel", "output_channel", "body", "input_specification", "output_specification", "samples", "sample", "sample_input", "sample_output"]
+  }
+}
