@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from editorial_model import (
+from editorial_model import (  # pyright: ignore[reportMissingImports]
     Diagnostic,
     EditorialDocument,
     Node,

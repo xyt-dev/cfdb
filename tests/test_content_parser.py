@@ -1,6 +1,6 @@
 import unittest
 
-from content_parser import (
+from content_parser import (  # pyright: ignore[reportMissingImports]
     ParseError,
     ParseLimits,
     class_tokens,

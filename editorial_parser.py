@@ -7,7 +7,7 @@ import re
 from urllib.parse import urljoin, urlsplit
 
 from editorial_model import Diagnostic, EditorialDocument, Node
-from content_parser import ParseError, ParseLimits, SourceNode, parse_source_html
+from content_parser import ParseError, ParseLimits, SourceNode, parse_source_html  # pyright: ignore[reportMissingImports]
 
 
 
