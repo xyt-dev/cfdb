@@ -1,6 +1,11 @@
 from importlib import import_module
+import contextlib
+import io
 from pathlib import Path
 import tempfile
+
+import cfcrawl
+import update
 import unittest
 from unittest.mock import patch
 
@@ -152,6 +157,62 @@ class StatementRebuildTests(unittest.TestCase):
             self.assertFalse(report["activated"])
             assert active is not None
             self.assertEqual(active.generation_id, "s1")
+
+
+    def test_cli_parses_validate_statement(self):
+        args = update.build_argument_parser().parse_args(
+            ["--validate-statement", "1700A"]
+        )
+        self.assertEqual(args.validate_statement, "1700A")
+
+    def test_cli_validate_statement_dispatches_without_activation(self):
+        with patch(
+            "update.validate_statement",
+            return_value={"ok": True, "problemCode": "1700A"},
+        ) as validate, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(update.main(["--validate-statement", "1700A"]), 0)
+        validate.assert_called_once_with("1700A")
+
+    def test_plain_statement_update_without_pointer_does_not_crawl(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            cfcrawl,
+            "STATEMENT_DIR",
+            directory,
+        ), patch("update.update_statements") as incremental, patch(
+            "update.rebuild_statements"
+        ) as rebuild, patch("update.main_crawl") as legacy, contextlib.redirect_stderr(
+            io.StringIO()
+        ):
+            self.assertNotEqual(update.main(["--statements"]), 0)
+
+        incremental.assert_not_called()
+        rebuild.assert_not_called()
+        legacy.assert_not_called()
+
+    def test_explicit_statement_rebuild_dispatches_once(self):
+        with patch(
+            "update.rebuild_statements",
+            return_value={"activated": False},
+        ) as rebuild, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(update.main(["--statements", "--rebuild"]), 1)
+        rebuild.assert_called_once_with()
+
+    def test_plain_statement_update_with_pointer_dispatches_incremental(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            cfcrawl,
+            "STATEMENT_DIR",
+            directory,
+        ):
+            root = Path(directory) / "v2"
+            root.mkdir()
+            (root / "current.json").write_text("{}", encoding="utf-8")
+            with patch(
+                "update.update_statements",
+                return_value={"activated": True},
+            ) as incremental, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(update.main(["--statements"]), 0)
+
+        incremental.assert_called_once_with()
 
 
 if __name__ == "__main__":
