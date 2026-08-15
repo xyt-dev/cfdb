@@ -1,6 +1,6 @@
 # Codeforces Editorial Structure-Preservation Design
 
-**Status:** Approved — amended for v2-only cutover on 2026-08-15
+**Status:** Superseded by `2026-08-15-codeforces-content-ir-v2-design.md`
 
 **Date:** 2026-08-14
 
