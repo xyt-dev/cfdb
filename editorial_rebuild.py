@@ -20,6 +20,7 @@ from editorial_cache import (
     activate_generation,
     load_active_generation,
 )
+from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_model import EditorialDocument, Node, canonical_json, validate_document
 from editorial_parser import ParseError, parse_blog_html  # pyright: ignore[reportAttributeAccessIssue]
 from editorial_render import render_editorial_html
@@ -436,7 +437,7 @@ def _resumable_generation_id(
         if (
             store.manifest["finalizedAt"] is None
             and store.manifest["parserVersion"] == PARSER_VERSION
-            and store.manifest["expectedContests"] == sorted(expected_contests)
+            and store.manifest["expectedIds"] == sorted(expected_contests)
         ):
             candidates.append((store.manifest["createdAt"], path.name))
     return max(candidates)[1] if candidates else None
@@ -486,7 +487,7 @@ def _run_generation(
             if not allow_resume:
                 raise ValueError(f"incremental generation already exists: {generation_id}")
             store = GenerationStore.open(root, generation_id)
-            if store.manifest["expectedContests"] != sorted(expected_contests):
+            if store.manifest["expectedIds"] != sorted(expected_contests):
                 raise ValueError("resumed generation contest set differs from problem metadata")
             if store.manifest["parserVersion"] != PARSER_VERSION:
                 raise ValueError("resumed generation parser version differs")
@@ -495,6 +496,7 @@ def _run_generation(
                 root,
                 generation_id,
                 expected_contests,
+                EDITORIAL_CODEC,
                 parser_version=PARSER_VERSION,
                 fixture_version=FIXTURE_VERSION,
                 lock=lock,
@@ -502,7 +504,7 @@ def _run_generation(
             if seed is not None and seed.manifest["parserVersion"] == PARSER_VERSION:
                 store.seed_from(seed, lock=lock)
                 for contest_id in requested:
-                    store.manifest["contests"].pop(contest_id, None)
+                    store.manifest["entries"].pop(contest_id, None)
 
         if store.manifest["finalizedAt"] is not None:
             active_snapshot = load_active_generation(root)
@@ -512,7 +514,7 @@ def _run_generation(
 
         todo = []
         for contest_id in expected_contests:
-            entry = store.manifest["contests"].get(contest_id)
+            entry = store.manifest["entries"].get(contest_id)
             status = entry.get("status") if isinstance(entry, dict) else None
             if status in {ContestStatus.READY.value, ContestStatus.KNOWN_ABSENT.value}:
                 if contest_id not in requested:
@@ -593,7 +595,7 @@ def update_editorials(
         raise RuntimeError("incremental editorial update requires an active v2 generation")
     metadata_contests = _contest_ids(editorial_source)
     expected = sorted(
-        set(active.manifest["expectedContests"]) | set(metadata_contests),
+        set(active.manifest["expectedIds"]) | set(metadata_contests),
         key=_contest_sort_key,
     )
     requested = {str(item) for item in requested_contests or []}
@@ -601,10 +603,10 @@ def update_editorials(
         raise ValueError("requested contest is absent from problem metadata and active generation")
     known_absent = {
         contest_id
-        for contest_id, entry in active.manifest["contests"].items()
+        for contest_id, entry in active.manifest["entries"].items()
         if entry.get("status") == ContestStatus.KNOWN_ABSENT.value
     }
-    new_contests = set(expected) - set(active.manifest["expectedContests"])
+    new_contests = set(expected) - set(active.manifest["expectedIds"])
     return _run_generation(
         source=editorial_source,
         cache_root=root,
