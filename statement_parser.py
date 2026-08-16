@@ -173,7 +173,18 @@ class _StatementMapper:
             "output_channel",
         } else "section"
         node = self._new_node(kind, attrs=attrs)
-        node.children = self._map_children(source)
+        if role in {"time_limit", "memory_limit"}:
+            for child in source.children:
+                mapped = self._map_node(child)
+                if mapped is None:
+                    continue
+                if "property-title" in class_tokens(child):
+                    title = _HTML_WHITESPACE.sub(" ", text_content(child)).strip()
+                    if title and not title.endswith((":", "：")):
+                        mapped.children.append(self._new_node("text", text=":"))
+                node.children.append(mapped)
+        else:
+            node.children = self._map_children(source)
         return node
 
     def _map_samples(self, source: SourceNode) -> ContentNode:
@@ -191,7 +202,7 @@ class _StatementMapper:
             if "sample-test" in classes:
                 if pending_input is not None:
                     raise ParseError("unpaired-sample-input")
-                samples.children.append(self._map_explicit_sample(child))
+                samples.children.extend(self._map_explicit_samples(child))
                 continue
             if "input" in classes:
                 if pending_input is not None:
@@ -211,12 +222,28 @@ class _StatementMapper:
             raise ParseError("unpaired-sample-input")
         return samples
 
-    def _map_explicit_sample(self, source: SourceNode) -> ContentNode:
-        inputs = [child for child in source.children if "input" in class_tokens(child)]
-        outputs = [child for child in source.children if "output" in class_tokens(child)]
-        if len(inputs) != 1 or len(outputs) != 1:
+    def _map_explicit_samples(self, source: SourceNode) -> list[ContentNode]:
+        samples: list[ContentNode] = []
+        pending_input: SourceNode | None = None
+        for child in source.children:
+            if child.tag == "#text" and not child.text.strip():
+                continue
+            classes = class_tokens(child)
+            if "input" in classes:
+                if pending_input is not None:
+                    raise ParseError("invalid-sample-pair")
+                pending_input = child
+                continue
+            if "output" in classes:
+                if pending_input is None:
+                    raise ParseError("invalid-sample-pair")
+                samples.append(self._make_sample(pending_input, child))
+                pending_input = None
+                continue
             raise ParseError("invalid-sample-pair")
-        return self._make_sample(inputs[0], outputs[0])
+        if pending_input is not None or not samples:
+            raise ParseError("invalid-sample-pair")
+        return samples
 
     def _make_sample(self, input_source: SourceNode, output_source: SourceNode) -> ContentNode:
         sample = self._new_node("section", attrs={"role": "sample"})

@@ -9,6 +9,7 @@ from pathlib import Path
 import tempfile
 import time
 from typing import Callable, Protocol, TypedDict
+from collections.abc import Collection
 
 import cfcrawl
 from cfcrawl import EditorialBuildResult, TutorialBatch, build_editorial_document
@@ -37,6 +38,7 @@ LIVE_1700_SENTINELS = {
     "1700F": "We are asked to find a minimum cost perfect matching",
 }
 ProgressCallback = Callable[[str, ContentStatus, int, int], None]
+PrioritySelector = Callable[[Collection[str]], str | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -438,6 +440,23 @@ def _requested_contests(
     return selected
 
 
+
+def pending_editorial_ids(
+    *,
+    source: EditorialSource | None = None,
+    cache_root: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    active_source = source or _LiveEditorialSource()
+    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
+    contest_ids = _contest_ids(active_source)
+    return _requested_contests(
+        ContentStore(root, EDITORIAL_CODEC),
+        contest_ids,
+        force=False,
+        requested_ids=set(),
+    )
+
+
 def _report(
     store: ContentStore,
     expected_ids: list[str],
@@ -482,6 +501,7 @@ def _crawl_editorials(
     force: bool,
     requested_ids: set[str],
     progress_callback: ProgressCallback | None,
+    priority_selector: PrioritySelector | None,
 ) -> dict[str, object]:
     expected_ids = _contest_ids(source)
     root = Path(cache_root)
@@ -493,10 +513,25 @@ def _crawl_editorials(
             force=force,
             requested_ids=requested_ids,
         )
+        total = len(todo)
+        remaining = dict.fromkeys(todo)
         results: list[EditorialBuildResult] = []
         completed_count = 0
-        for offset in range(0, len(todo), BATCH_SIZE):
-            batch = todo[offset:offset + BATCH_SIZE]
+        while remaining:
+            batch: list[str] = []
+            while remaining and len(batch) < BATCH_SIZE:
+                prioritized_id = (
+                    priority_selector(remaining.keys())
+                    if priority_selector is not None
+                    else None
+                )
+                selected_id = (
+                    prioritized_id
+                    if prioritized_id is not None and prioritized_id in remaining
+                    else next(iter(remaining))
+                )
+                del remaining[selected_id]
+                batch.append(selected_id)
             with ThreadPoolExecutor(max_workers=max(1, len(batch))) as executor:
                 futures = {
                     executor.submit(
@@ -540,9 +575,9 @@ def _crawl_editorials(
                             contest_id,
                             result.status,
                             completed_count,
-                            len(todo),
+                            total,
                         )
-            if offset + BATCH_SIZE < len(todo):
+            if remaining:
                 sleep_fn(delay)
         garbage_collection = store.garbage_collect_assets(lock=lock)
         return _report(store, expected_ids, results, garbage_collection)
@@ -555,6 +590,7 @@ def rebuild_editorials(
     delay: float = DEFAULT_DELAY,
     sleep_fn: Callable[[float], None] = time.sleep,
     progress_callback: ProgressCallback | None = None,
+    priority_selector: PrioritySelector | None = None,
 ) -> dict[str, object]:
     active_source = source or _LiveEditorialSource()
     root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
@@ -566,6 +602,7 @@ def rebuild_editorials(
         force=True,
         requested_ids=set(),
         progress_callback=progress_callback,
+        priority_selector=priority_selector,
     )
 
 
@@ -577,6 +614,7 @@ def update_editorials(
     delay: float = DEFAULT_DELAY,
     sleep_fn: Callable[[float], None] = time.sleep,
     progress_callback: ProgressCallback | None = None,
+    priority_selector: PrioritySelector | None = None,
 ) -> dict[str, object]:
     active_source = source or _LiveEditorialSource()
     root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
@@ -589,6 +627,7 @@ def update_editorials(
         force=False,
         requested_ids=requested,
         progress_callback=progress_callback,
+        priority_selector=priority_selector,
     )
 
 
@@ -599,6 +638,7 @@ __all__ = [
     "FetchReceipt",
     "LIVE_1700_SENTINELS",
     "PARSER_VERSION",
+    "pending_editorial_ids",
     "rebuild_editorials",
     "update_editorials",
     "validate_editorial",

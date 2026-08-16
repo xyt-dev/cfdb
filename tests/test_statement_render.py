@@ -73,6 +73,43 @@ class StatementRenderTests(unittest.TestCase):
         self.assertEqual(html.count("<h3>Input</h3>"), 2)
         self.assertEqual(html.count("<h3>Output</h3>"), 2)
 
+    def test_old_limit_ir_receives_colons_without_rebuild(self):
+        document = document_with(
+            Node(
+                kind="container",
+                attrs={"role": "time_limit"},
+                children=[
+                    Node(kind="container", children=[Node(kind="text", text="time limit per test")]),
+                    Node(kind="text", text="2 seconds"),
+                ],
+            ),
+            Node(
+                kind="container",
+                attrs={"role": "memory_limit"},
+                children=[
+                    Node(kind="container", children=[Node(kind="text", text="memory limit per test：")]),
+                    Node(kind="text", text="256 megabytes"),
+                ],
+            ),
+        )
+
+        html = render_statement_html(document)
+
+        self.assertIn('<div class="cf-time-limit">time limit per test:2 seconds</div>', html)
+        self.assertIn('<div class="cf-memory-limit">memory limit per test：256 megabytes</div>', html)
+
+        titleless = document_with(
+            Node(
+                kind="container",
+                attrs={"role": "time_limit"},
+                children=[Node(kind="container", children=[Node(kind="text", text="2 seconds")])],
+            )
+        )
+        self.assertEqual(
+            render_statement_html(titleless),
+            '<div class="cf-time-limit">2 seconds</div>',
+        )
+
     def test_pdf_attachment_renders_as_escaped_local_link_only(self):
         href = "/statement-assets/" + "a" * 64 + ".pdf"
         document = document_with(

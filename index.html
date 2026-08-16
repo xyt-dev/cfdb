@@ -6,6 +6,7 @@
     <link rel="icon" type="image/png" href="/vendor/cf-favicon.png" />
     <title>Codeforces Database — Codeforces Problem Library</title>
     <script src="/vendor/highlight.min.js"></script>
+    <script src="/vendor/highlight-qsharp.js"></script>
     <script src="/reader_payload.js"></script>
     <style>
       /* ═══ CodeNewRoman Nerd Font（本地，零 CDN）═══ */
@@ -326,6 +327,148 @@
       .reset-btn.mini:hover {
         color: var(--text);
         border-color: var(--accent);
+      }
+      .reset-btn.mini.rebuild-btn {
+        right: 108px;
+      }
+      .reset-btn.mini:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+
+      .rebuild-dialog {
+        width: min(760px, calc(100vw - 32px));
+        margin: auto;
+        padding: 0;
+        color: var(--text);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      }
+      .rebuild-dialog::backdrop {
+        background: rgba(0, 0, 0, 0.62);
+        backdrop-filter: blur(3px);
+      }
+      .rebuild-dialog-card {
+        padding: 22px;
+      }
+      .rebuild-dialog-title {
+        margin: 0 0 10px;
+        color: var(--text);
+        font-size: 18px;
+        line-height: 1.3;
+      }
+      .rebuild-dialog-message {
+        margin: 0;
+        color: var(--subtext);
+        font-size: 14px;
+        line-height: 1.55;
+        white-space: pre-line;
+      }
+      .rebuild-preview {
+        margin-top: 16px;
+        padding: 12px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      .rebuild-preview-summary {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        margin-bottom: 10px;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .rebuild-preview-summary span {
+        white-space: nowrap;
+      }
+      .rebuild-preview-tabs {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .rebuild-preview-tab {
+        padding: 7px 10px;
+        color: var(--subtext);
+        background: transparent;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .rebuild-preview-tab:hover,
+      .rebuild-preview-tab:focus-visible {
+        color: var(--text);
+        outline: none;
+      }
+      .rebuild-preview-tab[aria-selected="true"] {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+        font-weight: 700;
+      }
+      .rebuild-preview-panel {
+        max-height: 280px;
+        overflow-y: auto;
+        padding: 4px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .rebuild-preview-item {
+        display: block;
+        width: 100%;
+        padding: 7px 9px;
+        color: var(--text);
+        background: transparent;
+        border: 0;
+        border-radius: 4px;
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.35;
+        text-align: left;
+        cursor: pointer;
+      }
+      .rebuild-preview-item:hover,
+      .rebuild-preview-item:focus-visible {
+        background: var(--surface2);
+        outline: none;
+      }
+      .rebuild-preview-empty {
+        padding: 12px 9px;
+        color: var(--subtext);
+        font-size: 13px;
+      }
+      .rebuild-dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 22px;
+      }
+      .rebuild-dialog-button {
+        min-width: 88px;
+        padding: 8px 14px;
+        color: var(--text);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font: inherit;
+        cursor: pointer;
+      }
+      .rebuild-dialog-button:hover,
+      .rebuild-dialog-button:focus-visible {
+        border-color: var(--accent);
+        outline: none;
+      }
+      .rebuild-dialog-button.primary {
+        color: var(--bg);
+        background: var(--accent);
+        border-color: var(--accent);
+        font-weight: 700;
       }
 
       table {
@@ -689,6 +832,15 @@
 
       <div class="filters">
         <button
+          id="rebuild-btn"
+          class="reset-btn mini rebuild-btn"
+          data-i18n-title="rebuildTitle"
+          title="Retry missing and failed content"
+          onclick="requestRebuild(this)"
+        >
+          <span data-i18n="rebuild">Rebuild</span>
+        </button>
+        <button
           class="reset-btn mini"
           data-i18n-title="resetTitle"
           title="Reset filters"
@@ -807,6 +959,100 @@
       <div class="reader" id="reader"></div>
     </div>
 
+    <dialog
+      id="rebuild-dialog"
+      class="rebuild-dialog"
+      aria-labelledby="rebuild-dialog-title"
+      aria-describedby="rebuild-dialog-message"
+    >
+      <form method="dialog" class="rebuild-dialog-card">
+        <h2 id="rebuild-dialog-title" class="rebuild-dialog-title"></h2>
+        <p id="rebuild-dialog-message" class="rebuild-dialog-message"></p>
+        <section id="rebuild-preview" class="rebuild-preview" hidden>
+          <div class="rebuild-preview-summary" aria-live="polite">
+            <span id="rebuild-preview-statements-summary">Statements: 0</span>
+            <span id="rebuild-preview-editorials-summary">Editorials: 0</span>
+          </div>
+          <div
+            class="rebuild-preview-tabs"
+            role="tablist"
+            aria-label="Rebuild content"
+          >
+            <button
+              id="rebuild-preview-tab-statements"
+              class="rebuild-preview-tab"
+              type="button"
+              data-i18n="rebuildStatements"
+              onclick="selectRebuildPreviewTab('statements')"
+              role="tab"
+              aria-controls="rebuild-preview-panel-statements"
+              aria-selected="true"
+            >
+              Statements
+            </button>
+            <button
+              id="rebuild-preview-tab-editorials"
+              class="rebuild-preview-tab"
+              type="button"
+              data-i18n="rebuildEditorials"
+              onclick="selectRebuildPreviewTab('editorials')"
+              role="tab"
+              aria-controls="rebuild-preview-panel-editorials"
+              aria-selected="false"
+            >
+              Editorials
+            </button>
+          </div>
+          <div
+            id="rebuild-preview-panel-statements"
+            class="rebuild-preview-panel"
+            role="tabpanel"
+            aria-labelledby="rebuild-preview-tab-statements"
+          >
+            <div id="rebuild-preview-list-statements"></div>
+          </div>
+          <div
+            id="rebuild-preview-panel-editorials"
+            class="rebuild-preview-panel"
+            role="tabpanel"
+            aria-labelledby="rebuild-preview-tab-editorials"
+            hidden
+          >
+            <div id="rebuild-preview-list-editorials"></div>
+          </div>
+        </section>
+        <div class="rebuild-dialog-actions">
+          <button
+            id="rebuild-dialog-cancel"
+            class="rebuild-dialog-button"
+            value="cancel"
+            data-i18n="rebuildCancel"
+            hidden
+          >
+            Cancel
+          </button>
+          <button
+            id="rebuild-dialog-confirm"
+            class="rebuild-dialog-button primary"
+            value="confirm"
+            data-i18n="rebuildConfirmAction"
+            hidden
+          >
+            Rebuild
+          </button>
+          <button
+            id="rebuild-dialog-close"
+            class="rebuild-dialog-button primary"
+            value="close"
+            data-i18n="rebuildClose"
+            hidden
+          >
+            Close
+          </button>
+        </div>
+      </form>
+    </dialog>
+
     <script>
       /* ═══ i18n（默认英文，localStorage 记忆；「文/En」按钮切换）═══ */
       let lang = "en";
@@ -819,6 +1065,22 @@
           loading: "Loading...",
           theme: "🎨 Theme",
           contentUpdating: "Updating content...",
+          rebuild: "Rebuild",
+          rebuildTitle: "Retry all skipped content",
+          rebuildDialogTitle: "Retry skipped content",
+          rebuildConfirm:
+            "Force-retry every currently skipped statement and editorial shown below. Ready content is not changed.",
+          rebuildStarted: "Skipped-content crawl started.",
+          rebuildAlreadyRunning: "Skipped content is already being crawled.",
+          rebuildFailed: "Failed to start the skipped-content crawl.",
+          rebuildPreviewLoading: "Loading skipped content...",
+          rebuildPreviewFailed: "Could not load the skipped-content list.",
+          rebuildPreviewEmpty: "No skipped content is waiting for a retry.",
+          rebuildStatements: "Statements",
+          rebuildEditorials: "Editorials",
+          rebuildCancel: "Cancel",
+          rebuildConfirmAction: "Rebuild",
+          rebuildClose: "Close",
           reset: "Default",
           resetTitle: "Reset filters",
           ratingMin: "Min Rating",
@@ -892,6 +1154,22 @@
           loading: "加载中...",
           theme: "🎨 主题",
           contentUpdating: "内容更新中...",
+          rebuild: "重建",
+          rebuildTitle: "重爬所有跳过内容",
+          rebuildDialogTitle: "重爬跳过内容",
+          rebuildConfirm:
+            "强制重爬下面列出的所有当前跳过的题面和题解；已就绪内容不会改变。",
+          rebuildStarted: "跳过内容爬取已开始。",
+          rebuildAlreadyRunning: "跳过内容正在爬取中。",
+          rebuildFailed: "无法启动跳过内容爬取。",
+          rebuildPreviewLoading: "正在加载跳过内容……",
+          rebuildPreviewFailed: "无法加载跳过内容列表。",
+          rebuildPreviewEmpty: "当前没有等待重试的跳过内容。",
+          rebuildStatements: "题面",
+          rebuildEditorials: "题解",
+          rebuildCancel: "取消",
+          rebuildConfirmAction: "重建",
+          rebuildClose: "关闭",
           reset: "默认",
           resetTitle: "恢复默认筛选",
           ratingMin: "分数下限",
@@ -1101,6 +1379,9 @@
       };
       let lastDone = -1;
       let lastRefresh = 0;
+      let rebuildInFlight = false;
+      let rebuildRequestVersion = 0;
+      let rebuildRequestPending = false;
 
       /* 静默刷新题目数据（不重置筛选/页码），让列表标记自动更新 */
       async function refreshData() {
@@ -1115,6 +1396,8 @@
       }
 
       async function pollProgress() {
+        const pollVersion = rebuildRequestVersion;
+        const pollStartedPending = rebuildRequestPending;
         try {
           const r = await fetch("/api/progress");
           const s = await r.json();
@@ -1137,8 +1420,19 @@
           // 进度推进或后台更新结束 → 自动刷新列表标记（节流 10s）
           const busy =
             s.stage === "meta" ||
+            s.stage === "content" ||
             s.stage === "statements" ||
             s.stage === "editorials";
+          const rebuildButton = $("rebuild-btn");
+          if (
+            rebuildButton &&
+            !busy &&
+            pollVersion === rebuildRequestVersion &&
+            !pollStartedPending
+          ) {
+            rebuildInFlight = false;
+            rebuildButton.disabled = false;
+          }
           if (s.done !== lastDone || (busy === false && lastDone !== -1)) {
             const now = Date.now();
             if (now - lastRefresh > 10000) {
@@ -1179,6 +1473,236 @@
         }
         apply();
         saveState(); // 标签变化即保存
+      }
+
+      function selectRebuildPreviewTab(kind) {
+        const statements = kind === "statements";
+        const statementTab = $("rebuild-preview-tab-statements");
+        const editorialTab = $("rebuild-preview-tab-editorials");
+        const statementPanel = $("rebuild-preview-panel-statements");
+        const editorialPanel = $("rebuild-preview-panel-editorials");
+        statementTab.setAttribute("aria-selected", String(statements));
+        editorialTab.setAttribute("aria-selected", String(!statements));
+        statementPanel.hidden = !statements;
+        editorialPanel.hidden = statements;
+      }
+
+      function openRebuildPreviewItem(kind, contentId) {
+        const problem = ALL.find((item) =>
+          kind === "statements"
+            ? String(item.id) === contentId
+            : String(item.contestId) === contentId,
+        );
+        if (!problem) return;
+        const dialog = $("rebuild-dialog");
+        if (dialog.open) dialog.close("navigate");
+        showDetail(problem);
+        if (kind === "editorials") switchTab("editorial");
+      }
+
+      function renderRebuildPreviewGroup(kind, items) {
+        const list = $(`rebuild-preview-list-${kind}`);
+        list.replaceChildren();
+        if (!items.length) {
+          list.appendChild(
+            el("div", "rebuild-preview-empty", t("rebuildPreviewEmpty")),
+          );
+          return;
+        }
+        for (const item of items) {
+          if (!item || typeof item.id !== "string") continue;
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "rebuild-preview-item";
+          row.textContent =
+            typeof item.label === "string" && item.label ? item.label : item.id;
+          row.onclick = () => openRebuildPreviewItem(kind, item.id);
+          list.appendChild(row);
+        }
+        if (!list.childElementCount) {
+          list.appendChild(
+            el("div", "rebuild-preview-empty", t("rebuildPreviewEmpty")),
+          );
+        }
+      }
+
+      function renderRebuildPreview(preview) {
+        const statements =
+          preview &&
+          preview.statements &&
+          Array.isArray(preview.statements.items)
+            ? preview.statements.items
+            : [];
+        const editorials =
+          preview &&
+          preview.editorials &&
+          Array.isArray(preview.editorials.items)
+            ? preview.editorials.items
+            : [];
+        $("rebuild-preview-statements-summary").textContent =
+          `${t("rebuildStatements")}: ${statements.length}`;
+        $("rebuild-preview-editorials-summary").textContent =
+          `${t("rebuildEditorials")}: ${editorials.length}`;
+        $("rebuild-preview-tab-statements").textContent =
+          `${t("rebuildStatements")} (${statements.length})`;
+        $("rebuild-preview-tab-editorials").textContent =
+          `${t("rebuildEditorials")} (${editorials.length})`;
+        renderRebuildPreviewGroup("statements", statements);
+        renderRebuildPreviewGroup("editorials", editorials);
+        selectRebuildPreviewTab("statements");
+        $("rebuild-preview").hidden = false;
+        $("rebuild-dialog-confirm").disabled =
+          statements.length + editorials.length === 0;
+      }
+
+      function clearRebuildPreview() {
+        renderRebuildPreview({
+          statements: { items: [] },
+          editorials: { items: [] },
+        });
+      }
+
+      function showRebuildDialog({ title, message, mode, trigger, preview }) {
+        const dialog = $("rebuild-dialog");
+        const titleNode = $("rebuild-dialog-title");
+        const messageNode = $("rebuild-dialog-message");
+        const previewNode = $("rebuild-preview");
+        const cancelButton = $("rebuild-dialog-cancel");
+        const confirmButton = $("rebuild-dialog-confirm");
+        const closeButton = $("rebuild-dialog-close");
+        const confirmation = mode === "confirm";
+
+        titleNode.textContent = title;
+        messageNode.textContent = message;
+        cancelButton.hidden = !confirmation;
+        confirmButton.hidden = !confirmation;
+        closeButton.hidden = confirmation;
+        confirmButton.disabled = false;
+        previewNode.hidden = !(confirmation && preview);
+        if (confirmation && preview) renderRebuildPreview(preview);
+        dialog.returnValue = "";
+
+        return new Promise((resolve) => {
+          dialog.addEventListener(
+            "close",
+            () => {
+              if (
+                trigger &&
+                !trigger.disabled &&
+                typeof trigger.focus === "function"
+              ) {
+                trigger.focus();
+              }
+              resolve(dialog.returnValue === "confirm");
+            },
+            { once: true },
+          );
+          dialog.showModal();
+          (confirmation ? cancelButton : closeButton).focus();
+        });
+      }
+
+      async function fetchRebuildPreview() {
+        const response = await fetch("/api/rebuild/preview");
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (e) {}
+        if (
+          !response.ok ||
+          !payload ||
+          payload.status !== "ready" ||
+          !payload.statements ||
+          !payload.editorials
+        ) {
+          throw new Error("rebuild-preview-failed");
+        }
+        return payload;
+      }
+
+      async function requestRebuild(button) {
+        rebuildRequestVersion += 1;
+        rebuildRequestPending = true;
+        rebuildInFlight = true;
+        button.disabled = true;
+        let accepted = false;
+        let preview;
+        try {
+          preview = await fetchRebuildPreview();
+        } catch (e) {
+          await showRebuildDialog({
+            title: t("rebuildDialogTitle"),
+            message: t("rebuildPreviewFailed"),
+            mode: "status",
+            trigger: button,
+          });
+          rebuildRequestPending = false;
+          rebuildInFlight = false;
+          button.disabled = false;
+          return;
+        }
+
+        try {
+          const confirmed = await showRebuildDialog({
+            title: t("rebuildDialogTitle"),
+            message: t("rebuildConfirm"),
+            mode: "confirm",
+            trigger: button,
+            preview,
+          });
+          if (!confirmed) return;
+
+          const response = await fetch("/api/rebuild", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true }),
+          });
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch (e) {}
+          const operation = payload && payload.operation;
+          if (
+            !response.ok ||
+            !payload ||
+            payload.status !== "accepted" ||
+            (operation !== "started" && operation !== "already_running")
+          ) {
+            await showRebuildDialog({
+              title: t("rebuildDialogTitle"),
+              message: t("rebuildFailed"),
+              mode: "status",
+              trigger: button,
+            });
+          } else {
+            accepted = true;
+            rebuildRequestPending = false;
+            clearRebuildPreview();
+            await showRebuildDialog({
+              title: t("rebuildDialogTitle"),
+              message: t(
+                operation === "already_running"
+                  ? "rebuildAlreadyRunning"
+                  : "rebuildStarted",
+              ),
+              mode: "status",
+              trigger: button,
+            });
+          }
+        } catch (e) {
+          await showRebuildDialog({
+            title: t("rebuildDialogTitle"),
+            message: t("rebuildFailed"),
+            mode: "status",
+            trigger: button,
+          });
+        } finally {
+          if (!accepted) {
+            rebuildRequestPending = false;
+            rebuildInFlight = false;
+            button.disabled = false;
+          }
+        }
       }
 
       /* 恢复默认筛选 */
@@ -1341,6 +1865,50 @@
         saveState(); // 翻页保存页码（刷新后恢复）
       }
 
+      const RETRYABLE_CONTENT_STATUSES = new Set([
+        "pending",
+        "transient_failure",
+        "invalid_structure",
+        "invalid_ref",
+      ]);
+      const prioritySignals = new Map();
+
+      async function prioritizeUnavailableContent(contentKind, payload) {
+        if (
+          !currentProblem ||
+          !payload ||
+          payload.body != null ||
+          !RETRYABLE_CONTENT_STATUSES.has(payload.status)
+        ) {
+          return false;
+        }
+        if (contentKind !== "statement" && contentKind !== "editorial") {
+          return false;
+        }
+        const contentId =
+          contentKind === "statement"
+            ? `${currentProblem.contestId}${currentProblem.index}`
+            : String(currentProblem.contestId);
+        const key = `${contentKind}:${contentId}`;
+        if (prioritySignals.has(key)) return false;
+        const signalToken = {};
+        prioritySignals.set(key, signalToken);
+        try {
+          const response = await fetch("/api/prioritize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kind: contentKind, contentId }),
+          });
+          if (!response.ok) throw new Error("priority request failed");
+          return true;
+        } catch (e) {
+          if (prioritySignals.get(key) === signalToken) {
+            prioritySignals.delete(key);
+          }
+          return false;
+        }
+      }
+
       /* ═══ 视图切换 ═══ */
       function showDetail(p) {
         if (location.hash !== "#/problem/" + p.id) {
@@ -1349,6 +1917,7 @@
           } catch (e) {}
         }
         currentProblem = p;
+        prioritySignals.clear();
         tabCache = {};
         currentTab = "statement";
         $("list-view").style.display = "none";
@@ -1421,6 +1990,7 @@
             if (seq !== loadSeq) return; // 已切走（tab/题目变了），丢弃过期响应
             reader.replaceChildren();
             const payload = CFDBReaderPayload.normalizeApiPayload(d);
+            prioritizeUnavailableContent("statement", payload);
             if (!payload || payload.body == null) {
               let message = t("noStatement");
               if (payload && payload.status === "pending") {
@@ -1457,6 +2027,7 @@
             if (seq !== loadSeq) return; // 用户已切回题面/别的题，丢弃过期题解响应
             reader.replaceChildren();
             const payload = CFDBReaderPayload.normalizeApiPayload(d);
+            prioritizeUnavailableContent("editorial", payload);
             if (!payload || payload.body == null) {
               let message = t("noEditorialUnknown");
               if (payload && payload.status === "pending") {
@@ -1747,6 +2318,7 @@ blockquote { border-left:3px solid ${c.border}; margin:10px 0; padding:2px 14px;
 <script src="/vendor/tex-svg-full.js"><\/script>
 </head><body>${sourceUrl ? `<div class="topwrap"><a class="open" href="${sourceUrl}" target="_blank">${t("openTop")}</a></div>` : ""}<div id="content">${html}</div>
 <script src="/vendor/highlight.min.js"><\/script>
+<script src="/vendor/highlight-qsharp.js"><\/script>
 <script>
 /* 样例/代码框复制按钮：clipboard API（安全上下文）→ execCommand fallback（任何浏览器） */
 document.querySelectorAll('pre').forEach(function(pre){
@@ -1813,10 +2385,10 @@ document.addEventListener('toggle', function (e) {
     MathJax.typesetPromise([e.target]).catch(function () {});
   }
 });
-/* 代码块语法高亮：仅带语言标注的高亮；裸代码块（样例等）保持纯文本 */
+/* 代码块语法高亮：仅高亮带语言标注且不属于题面样例的代码块 */
 document.querySelectorAll('pre code').forEach(function(el){
   try {
-    if (el.className && el.className.indexOf('language-') === 0) {
+    if (el.className && el.className.indexOf('language-') === 0 && !el.closest('.cf-sample-input, .cf-sample-output')) {
       hljs.highlightElement(el);
     }
   } catch(e) {}

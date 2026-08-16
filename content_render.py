@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 from content_asset_policy import asset_identity_from_route  # pyright: ignore[reportMissingImports]
 from urllib.parse import unquote, urlsplit
 
@@ -31,6 +32,7 @@ _KNOWN_CODE_LANGUAGES = frozenset(
         "pascal",
         "php",
         "python",
+        "qsharp",
         "ruby",
         "rust",
         "scala",
@@ -39,6 +41,60 @@ _KNOWN_CODE_LANGUAGES = frozenset(
     }
 )
 _MISSING_ASSET_HTML = '<span class="img-missing">Image unavailable</span>'
+
+
+def _detect_code_language(code: str) -> str | None:
+    sample = code[:400]
+    if not sample.strip():
+        return None
+    if re.search(r"\boperation\s+[A-Za-z_]\w*\s*(?:<[^>]+>\s*)?\(", sample):
+        return "qsharp"
+    if re.search(r"\bfunction\s+[A-Za-z_]\w*\s*(?:<[^>]+>\s*)?\(", sample) and (
+        "Qubit" in sample or "Microsoft.Quantum" in sample
+    ):
+        return "qsharp"
+    if (
+        re.search(r"#include\s*[<\"]", sample)
+        and re.search(r"\b(?:printf|scanf)\s*\(", sample)
+        and not re.search(r"\b(?:cin|cout|std::|vector<)\b|bits/stdc\+\+", sample)
+    ):
+        return "c"
+    if re.search(r"#include\s*[<\"]", sample) or re.search(
+        r"\b(?:cin|cout|endl|std::|vector<|using namespace|int main\s*\()",
+        sample,
+    ):
+        return "cpp"
+    if re.search(r"\bfn\s+\w+\s*\(", sample) and re.search(
+        r"\b(?:let\s+mut|println!|use\s+\w+::)", sample
+    ):
+        return "rust"
+    if re.search(r"\bfun\s+\w+\s*\(", sample):
+        return "kotlin"
+    if re.search(r"\b(?:package\s+main|func\s+\w+\s*\()", sample):
+        return "go"
+    if re.search(
+        r"\busing\s+System(?:\.|;)|\bConsole\.(?:Write|Read)|\bstatic\s+void\s+Main\s*\(",
+        sample,
+    ):
+        return "csharp"
+    if re.search(
+        r"\bSystem\.out|\bimport\s+java\.|\bstatic\s+void\s+main\s*\(\s*String(?:\[\]|\s*\.\.\.)",
+        sample,
+    ):
+        return "java"
+    if re.search(r"\bdef\s+\w+\s*\([^)]*\)\s*:", sample) or (
+        re.search(r"\bprint\s*\(", sample)
+        and re.search(
+            r"\b(?:for\s+\w+\s+in|range\s*\(|import\s+\w+|from\s+\w+\s+import|if\s+__name__)",
+            sample,
+        )
+    ):
+        return "python"
+    if re.search(r"\bfunction\s+\w+\s*\(", sample) or (
+        re.search(r"\b(?:const|let|var)\s+\w+", sample) and "=>" in sample
+    ):
+        return "javascript"
+    return None
 _STATEMENT_ROLE_ELEMENTS = {
     "body": ("section", "cf-statement-body"),
     "input_specification": ("section", "cf-input-specification"),
@@ -224,6 +280,10 @@ def _render_spoiler_title(node: ContentNode, *, content_kind: str) -> str:
     )
 
 
+def _node_text(node: ContentNode) -> str:
+    return (node.text or "") + "".join(_node_text(child) for child in node.children)
+
+
 def _render_role_node(node: ContentNode, *, content_kind: str) -> str | None:
     role = node.attrs.get("role")
     if role is None:
@@ -242,7 +302,15 @@ def _render_role_node(node: ContentNode, *, content_kind: str) -> str | None:
     if element is None:
         raise RenderError("unknown-statement-role")
     tag, class_name = element
-    body = _render_children(node, content_kind=content_kind)
+    if role in {"time_limit", "memory_limit"} and len(node.children) > 1 and node.children[0].kind == "container":
+        label = node.children[0]
+        label_text = _node_text(label).rstrip()
+        suffix = "" if not label_text or label_text.endswith((":", "：")) else ":"
+        body = _render_node(label, content_kind=content_kind) + suffix + "".join(
+            _render_node(child, content_kind=content_kind) for child in node.children[1:]
+        )
+    else:
+        body = _render_children(node, content_kind=content_kind)
     return f'<{tag} class="{class_name}">{body}</{tag}>'
 
 
@@ -278,6 +346,8 @@ def _render_node(node: ContentNode, *, content_kind: str) -> str:
     if kind == "code_block":
         code = escape(node.text or "", quote=True)
         language = node.attrs.get("language")
+        if language is None:
+            language = _detect_code_language(node.text or "")
         if language in _KNOWN_CODE_LANGUAGES:
             return f'<pre><code class="language-{language}">{code}</code></pre>'
         return f"<pre><code>{code}</code></pre>"

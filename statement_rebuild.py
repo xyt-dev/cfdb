@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import time
 from typing import Callable
+from collections.abc import Collection
 
 from content_cache import (  # pyright: ignore[reportMissingImports]
     ContentStatus,
@@ -30,6 +31,7 @@ FIXTURE_VERSION = "statement-fixtures-v2"
 DEFAULT_DELAY = 1.5
 DEFAULT_CACHE_ROOT = Path(__file__).resolve().parent / "statements" / "v2"
 ProgressCallback = Callable[[str, ContentStatus, int, int], None]
+PrioritySelector = Callable[[Collection[str]], str | None]
 
 
 def _expected_problem_identities(source: StatementSource) -> list[ProblemIdentity]:
@@ -97,6 +99,24 @@ def _requested_identities(
     return selected
 
 
+
+def pending_statement_ids(
+    *,
+    source: StatementSource | None = None,
+    cache_root: str | os.PathLike[str] | None = None,
+) -> list[str]:
+    active_source = source or LiveStatementSource()
+    root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
+    identities = _expected_problem_identities(active_source)
+    selected = _requested_identities(
+        ContentStore(root, STATEMENT_CODEC),
+        identities,
+        force=False,
+        requested_ids=set(),
+    )
+    return [identity.problem_code for identity in selected]
+
+
 def _report(
     store: ContentStore,
     expected_ids: list[str],
@@ -141,6 +161,7 @@ def _crawl_statements(
     force: bool,
     requested_ids: set[str],
     progress_callback: ProgressCallback | None,
+    priority_selector: PrioritySelector | None,
 ) -> dict[str, object]:
     identities = _expected_problem_identities(source)
     expected_ids = [item.problem_code for item in identities]
@@ -153,8 +174,22 @@ def _crawl_statements(
             force=force,
             requested_ids=requested_ids,
         )
+        total = len(todo)
+        remaining = {item.problem_code: item for item in todo}
         results: list[StatementBuildResult] = []
-        for offset, identity in enumerate(todo):
+        completed_count = 0
+        while remaining:
+            prioritized_id = (
+                priority_selector(remaining.keys())
+                if priority_selector is not None
+                else None
+            )
+            selected_id = (
+                prioritized_id
+                if prioritized_id is not None and prioritized_id in remaining
+                else next(iter(remaining))
+            )
+            identity = remaining.pop(selected_id)
             result = fetch_statement_v2(
                 identity.problem_code,
                 source=source,
@@ -176,14 +211,15 @@ def _crawl_statements(
                     lock=lock,
                 )
             results.append(result)
+            completed_count += 1
             if progress_callback is not None:
                 progress_callback(
                     identity.problem_code,
                     result.status,
-                    offset + 1,
-                    len(todo),
+                    completed_count,
+                    total,
                 )
-            if offset + 1 < len(todo):
+            if remaining:
                 sleep_fn(delay)
         garbage_collection = store.garbage_collect_assets(lock=lock)
         return _report(store, expected_ids, results, garbage_collection)
@@ -196,6 +232,7 @@ def rebuild_statements(
     delay: float = DEFAULT_DELAY,
     sleep_fn: Callable[[float], None] = time.sleep,
     progress_callback: ProgressCallback | None = None,
+    priority_selector: PrioritySelector | None = None,
 ) -> dict[str, object]:
     active_source = source or LiveStatementSource()
     root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
@@ -207,6 +244,7 @@ def rebuild_statements(
         force=True,
         requested_ids=set(),
         progress_callback=progress_callback,
+        priority_selector=priority_selector,
     )
 
 
@@ -218,6 +256,7 @@ def update_statements(
     delay: float = DEFAULT_DELAY,
     sleep_fn: Callable[[float], None] = time.sleep,
     progress_callback: ProgressCallback | None = None,
+    priority_selector: PrioritySelector | None = None,
 ) -> dict[str, object]:
     active_source = source or LiveStatementSource()
     root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
@@ -230,6 +269,7 @@ def update_statements(
         force=False,
         requested_ids=requested,
         progress_callback=progress_callback,
+        priority_selector=priority_selector,
     )
 
 
@@ -286,6 +326,7 @@ __all__ = [
     "DEFAULT_CACHE_ROOT",
     "FIXTURE_VERSION",
     "PARSER_VERSION",
+    "pending_statement_ids",
     "rebuild_statements",
     "update_statements",
     "validate_statement",

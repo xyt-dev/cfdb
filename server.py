@@ -5,11 +5,13 @@ import http.server
 import hashlib
 from pathlib import Path
 import json
+import copy
 import os
 import subprocess
 import sys
 import threading
 import urllib.parse
+from typing import cast
 
 import cfcrawl
 from content_asset_policy import (  # pyright: ignore[reportMissingImports]
@@ -18,8 +20,9 @@ from content_asset_policy import (  # pyright: ignore[reportMissingImports]
     parse_asset_name,
 )
 from content_cache import ContentStatus, ContentStore  # pyright: ignore[reportMissingImports]
-from editorial_rebuild import update_editorials
-from statement_rebuild import update_statements  # pyright: ignore[reportMissingImports]
+from crawl_priority import CrawlPriorityQueue  # pyright: ignore[reportMissingImports]
+from editorial_rebuild import pending_editorial_ids, update_editorials
+from statement_rebuild import pending_statement_ids, update_statements  # pyright: ignore[reportMissingImports]
 from editorial_render import render_editorial_html
 from statement_render import render_statement_html  # pyright: ignore[reportMissingImports]
 
@@ -50,6 +53,132 @@ crawl_state = {
     "content": {},
 }
 _crawl_state_lock = threading.Lock()
+_crawl_operation_lock = threading.Lock()
+_crawl_priority = CrawlPriorityQueue()
+
+
+def _progress_snapshot() -> dict:
+    with _crawl_state_lock:
+        return copy.deepcopy(crawl_state)
+
+
+def _begin_content_progress() -> None:
+    with _crawl_state_lock:
+        crawl_state.clear()
+        crawl_state.update(
+            stage="content",
+            done=0,
+            total=0,
+            cached=0,
+            fetched=0,
+            failed=0,
+            contentStatus={"statement": "idle", "editorial": "idle"},
+            content={},
+        )
+
+
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _priority_content_exists(content_kind: object, content_id: object) -> bool:
+    if not isinstance(content_kind, str) or not isinstance(content_id, str):
+        return False
+    if content_kind not in {"statement", "editorial"}:
+        return False
+    for problem in PROBLEMS:
+        if not isinstance(problem, dict):
+            continue
+        contest_id = problem.get("contestId")
+        index = problem.get("index")
+        if not isinstance(contest_id, int) or not isinstance(index, str):
+            continue
+        if content_kind == "statement" and f"{contest_id}{index}" == content_id:
+            return True
+        if content_kind == "editorial" and str(contest_id) == content_id:
+            return True
+    return False
+
+
+
+def _preview_items(content_kind: str, content_ids: list[str]) -> list[dict[str, str]]:
+    if content_kind == "statement":
+        labels: dict[str, str] = {}
+        for problem in PROBLEMS:
+            if not isinstance(problem, dict):
+                continue
+            contest_id = problem.get("contestId")
+            index = problem.get("index")
+            if not isinstance(contest_id, int) or not isinstance(index, str):
+                continue
+            content_id = f"{contest_id}{index}"
+            name = problem.get("name")
+            labels[content_id] = (
+                f"{content_id} — {name}"
+                if isinstance(name, str) and name
+                else content_id
+            )
+    else:
+        labels = {
+            str(problem["contestId"]): f"Contest {problem['contestId']}"
+            for problem in PROBLEMS
+            if isinstance(problem, dict) and isinstance(problem.get("contestId"), int)
+        }
+    return [
+        {"id": content_id, "label": labels.get(content_id, content_id)}
+        for content_id in content_ids
+    ]
+
+
+def _ordered_preview_ids(content_kind: str, content_ids: list[str]) -> list[str]:
+    pending = set(content_ids)
+    priority = [
+        content_id
+        for content_id in _crawl_priority.snapshot(content_kind)
+        if content_id in pending
+    ]
+    priority_set = set(priority)
+    return priority + [
+        content_id for content_id in content_ids if content_id not in priority_set
+    ]
+
+
+def _build_rebuild_preview() -> dict[str, object]:
+    statement_ids = _ordered_preview_ids(
+        "statement",
+        pending_statement_ids(cache_root=STATEMENT_V2_ROOT),
+    )
+    editorial_ids = _ordered_preview_ids(
+        "editorial",
+        pending_editorial_ids(cache_root=EDITORIAL_V2_ROOT),
+    )
+    statements = _preview_items("statement", statement_ids)
+    editorials = _preview_items("editorial", editorial_ids)
+    return {
+        "ok": True,
+        "status": "ready",
+        "statements": {"count": len(statements), "items": statements},
+        "editorials": {"count": len(editorials), "items": editorials},
+    }
+
+
+def _enqueue_rebuild_snapshot(preview: dict[str, object]) -> None:
+    for content_kind, key in (("statement", "statements"), ("editorial", "editorials")):
+        group = preview.get(key)
+        items = group.get("items") if isinstance(group, dict) else None
+        if not isinstance(items, list):
+            raise ValueError("invalid-rebuild-preview")
+        content_ids = [
+            item["id"]
+            for item in items
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+        _crawl_priority.enqueue_many(content_kind, content_ids)
 
 
 def _content_progress_callback(content_kind: str):
@@ -121,12 +250,23 @@ def _update_content(content_kind: str, root: Path, updater) -> None:
         report = updater(
             cache_root=root,
             progress_callback=_content_progress_callback(content_kind),
+            priority_selector=lambda remaining: _crawl_priority.pop_next(
+                content_kind, remaining
+            ),
         )
         _record_content_update(content_kind, report)
     except Exception as error:
         with _crawl_state_lock:
             crawl_state["contentStatus"][content_kind] = "error"
-            crawl_state["content"][content_kind] = {"error": str(error)}
+            detail = crawl_state["content"].setdefault(content_kind, {})
+            detail.update(
+                error=str(error),
+                failed=max(int(detail.get("failed", 0)), 1),
+                completed=False,
+            )
+            crawl_state["failed"] = sum(
+                item.get("failed", 0) for item in crawl_state["content"].values()
+            )
         print(f"[auto-update] {content_kind} crawl failed: {error}")
         return
     counts = report["statusCounts"]
@@ -149,7 +289,7 @@ def _reload_problems() -> None:
     PROBLEMS = value
 
 
-def auto_update():
+def _auto_update():
     """Refresh metadata, then crawl both content kinds from any store state."""
     try:
         with _crawl_state_lock:
@@ -208,6 +348,83 @@ def auto_update():
             crawl_state["error"] = str(error)
         print(f"[auto-update] error: {error}", flush=True)
         traceback.print_exc()
+
+
+def auto_update() -> bool:
+    if not _crawl_operation_lock.acquire(blocking=False):
+        print("[auto-update] skipped: another content operation is active")
+        return False
+    try:
+        _auto_update()
+    finally:
+        _crawl_operation_lock.release()
+    return True
+
+
+def _rebuild_content() -> None:
+    try:
+        _begin_content_progress()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(
+                    _update_content,
+                    "statement",
+                    STATEMENT_V2_ROOT,
+                    update_statements,
+                ),
+                executor.submit(
+                    _update_content,
+                    "editorial",
+                    EDITORIAL_V2_ROOT,
+                    update_editorials,
+                ),
+            ]
+            for future in futures:
+                future.result()
+        with _crawl_state_lock:
+            failed_kinds = [
+                content_kind
+                for content_kind, status in crawl_state["contentStatus"].items()
+                if status == "error"
+            ]
+            if failed_kinds:
+                crawl_state["stage"] = "error"
+                crawl_state["error"] = "rebuild failed: " + ", ".join(failed_kinds)
+            else:
+                crawl_state["stage"] = "done"
+        print(
+            "[rebuild] finished with crawler errors"
+            if failed_kinds
+            else "[rebuild] all missing-content crawls finished"
+        )
+    except Exception as error:
+        with _crawl_state_lock:
+            crawl_state["stage"] = "error"
+            crawl_state["error"] = str(error)
+        print(f"[rebuild] error: {error}", flush=True)
+
+
+def _rebuild_worker() -> None:
+    try:
+        _rebuild_content()
+    finally:
+        _crawl_operation_lock.release()
+
+
+def start_rebuild() -> str:
+    if not _crawl_operation_lock.acquire(blocking=False):
+        return "already_running"
+    try:
+        _begin_content_progress()
+        worker = threading.Thread(target=_rebuild_worker, daemon=True)
+        worker.start()
+    except Exception as error:
+        with _crawl_state_lock:
+            crawl_state["stage"] = "error"
+            crawl_state["error"] = str(error)
+        _crawl_operation_lock.release()
+        raise
+    return "started"
 
 
 def _valid_ref(cid: str, idx: str) -> bool:
@@ -496,7 +713,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "application/json",
             )
         elif u.path == "/api/progress":
-            self._send(200, json.dumps(crawl_state).encode(), "application/json")
+            self._send(200, json.dumps(_progress_snapshot()).encode(), "application/json")
+        elif u.path == "/api/rebuild/preview":
+            try:
+                payload = _build_rebuild_preview()
+            except (OSError, ValueError, TypeError, KeyError):
+                payload = {"ok": False, "status": "preview_failed"}
+                self._send(500, json.dumps(payload).encode(), "application/json")
+            else:
+                self._send(200, json.dumps(payload).encode(), "application/json")
         elif u.path == "/api/editorial":
             q = urllib.parse.parse_qs(u.query)
             cid = q.get("contestId", [""])[0]
@@ -518,6 +743,78 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps({"files": files}).encode(), "application/json")
         else:
             self._send(404, b"not found", "text/plain")
+
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path not in {"/api/rebuild", "/api/prioritize"}:
+            self._send(404, b"not found", "text/plain")
+            return
+        content_type = self.headers.get("Content-Type", "").partition(";")[0].strip().lower()
+        if content_type != "application/json":
+            payload = {"ok": False, "status": "unsupported_media_type"}
+            self._send(415, json.dumps(payload).encode(), "application/json")
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            content_length = 0
+        if content_length > 256:
+            payload = {"ok": False, "status": "payload_too_large"}
+            self._send(413, json.dumps(payload).encode(), "application/json")
+            return
+        invalid_status = (
+            "invalid_confirmation" if path == "/api/rebuild" else "invalid_priority"
+        )
+        if content_length <= 0:
+            payload = {"ok": False, "status": invalid_status}
+            self._send(400, json.dumps(payload).encode(), "application/json")
+            return
+        try:
+            request = json.loads(
+                self.rfile.read(content_length),
+                object_pairs_hook=_strict_json_object,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+            request = None
+        if path == "/api/rebuild":
+            valid = (
+                isinstance(request, dict)
+                and set(request) == {"confirm"}
+                and isinstance(request["confirm"], bool)
+                and request["confirm"]
+            )
+        else:
+            valid = (
+                isinstance(request, dict)
+                and set(request) == {"kind", "contentId"}
+                and _priority_content_exists(
+                    request.get("kind"), request.get("contentId")
+                )
+            )
+        if not valid:
+            payload = {"ok": False, "status": invalid_status}
+            self._send(400, json.dumps(payload).encode(), "application/json")
+            return
+        if path == "/api/prioritize":
+            if not isinstance(request, dict):
+                raise AssertionError("validated priority request is not an object")
+            priority_kind = request.get("kind")
+            priority_id = request.get("contentId")
+            if not isinstance(priority_kind, str) or not isinstance(priority_id, str):
+                raise AssertionError("validated priority request has invalid fields")
+            _crawl_priority.prioritize(priority_kind, priority_id)
+        if path == "/api/rebuild":
+            try:
+                preview = _build_rebuild_preview()
+                _enqueue_rebuild_snapshot(preview)
+            except (OSError, ValueError, TypeError, KeyError):
+                payload = {"ok": False, "status": "preview_failed"}
+                self._send(500, json.dumps(payload).encode(), "application/json")
+                return
+        operation = start_rebuild()
+        payload = {"ok": True, "status": "accepted", "operation": operation}
+        self._send(202, json.dumps(payload).encode(), "application/json")
 
     def do_OPTIONS(self):
         self.send_response(200)

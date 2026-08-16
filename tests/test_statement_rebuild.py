@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from content_assets import AssetFetchResult  # pyright: ignore[reportMissingImports]
+from crawl_priority import CrawlPriorityQueue  # pyright: ignore[reportMissingImports]
 from content_cache import ContentStatus, ContentStore  # pyright: ignore[reportMissingImports]
 from content_codecs import STATEMENT_CODEC  # pyright: ignore[reportMissingImports]
 from statement_crawl import ProblemIdentity, SourceFetch  # pyright: ignore[reportMissingImports]
@@ -158,6 +159,35 @@ class StatementRebuildTests(unittest.TestCase):
                 ContentStore(directory, STATEMENT_CODEC).ready_ids(),
                 {"1700A", "1700B"},
             )
+
+
+    def test_incremental_update_promotes_clicked_problem_before_next_fetch(self):
+        source = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "A body"),
+                ("1700", "B"): statement_html("B", "B body"),
+                ("1700", "C"): statement_html("C", "C body"),
+            }
+        )
+        priority = CrawlPriorityQueue()
+
+        def prioritize_after_first(_delay: float) -> None:
+            if source.fetches == ["1700A"]:
+                priority.prioritize("statement", "1700C")
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = update_statements(
+                source=source,
+                cache_root=directory,
+                delay=0,
+                sleep_fn=prioritize_after_first,
+                priority_selector=lambda remaining: priority.pop_next(
+                    "statement", remaining
+                ),
+            )
+
+        self.assertTrue(report["completed"])
+        self.assertEqual(source.fetches, ["1700A", "1700C", "1700B"])
 
     def test_failed_item_is_recorded_and_retried_without_hiding_ready_items(self):
         failing = FixtureStatementSource(

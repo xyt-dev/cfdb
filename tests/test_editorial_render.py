@@ -88,8 +88,68 @@ class EditorialRenderTests(unittest.TestCase):
         source = (Path(__file__).parent / "fixtures/editorials/synthetic/code-and-math.html").read_text(encoding="utf-8")
         document = parse_blog_html(source, contest_id="1", source_url="u")
         html = render_editorial_html(document)
+        self.assertIn('<pre><code class="language-cpp">', html)
         self.assertIn("#include &lt;bits/stdc++.h&gt;\n  return 0;", html)
         self.assertIn("Formula: $x_1 &lt; y$", html)
+
+    def test_bare_code_blocks_receive_deterministic_language_classes(self):
+        qsharp = """namespace Solution {
+    open Microsoft.Quantum.Primitive;
+    open Microsoft.Quantum.Canon;
+
+    operation Solve (q : Qubit, sign : Int) : ()
+    {
+        body
+        {
+            // your code here
+        }
+    }
+}"""
+        document = fixture_document(
+            Node(kind="code_block", text=qsharp),
+            Node(kind="code_block", text="#include <bits/stdc++.h>\nint main() { return 0; }"),
+            Node(kind="code_block", text="1 2\n3 4\n"),
+        )
+
+        html = render_editorial_html(document)
+
+        self.assertIn('<pre><code class="language-qsharp">namespace Solution {', html)
+        self.assertIn('<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;', html)
+        self.assertIn("<pre><code>1 2\n3 4\n</code></pre>", html)
+
+    def test_bare_code_detection_distinguishes_supported_signatures(self):
+        cases = (
+            ("c", '#include <stdio.h>\nint main() { printf("%d", 1); }'),
+            ("csharp", "using System;\npublic class Program { static void Main() { Console.WriteLine(1); } }"),
+            ("java", "public class Main { public static void main(String[] args) { System.out.println(1); } }"),
+            ("rust", 'fn main() { let mut value = 1; println!("{}", value); }'),
+            ("kotlin", 'fun main() { println("ok") }'),
+            ("go", 'package main\nfunc main() { fmt.Println("ok") }'),
+            ("python", "def solve():\n    print(1)"),
+            ("javascript", "const solve = () => console.log(1);"),
+        )
+
+        for language, code in cases:
+            with self.subTest(language=language):
+                html = render_editorial_html(fixture_document(Node(kind="code_block", text=code)))
+                self.assertIn(f'<pre><code class="language-{language}">', html)
+
+    def test_bare_code_detection_rejects_overlapping_weak_signatures(self):
+        cases = (
+            ("javascript", "function solve() { return document.body; }"),
+            ("javascript", "function solve() { return Result; }"),
+            ("csharp", "namespace App { public class Program { static void Main() {} } }"),
+            (None, "public class Container {}"),
+            (None, "print(value)\nrepeat until done"),
+        )
+
+        for language, code in cases:
+            with self.subTest(language=language, code=code):
+                html = render_editorial_html(fixture_document(Node(kind="code_block", text=code)))
+                if language is None:
+                    self.assertNotIn("<pre><code class=", html)
+                else:
+                    self.assertIn(f'<pre><code class="language-{language}">', html)
 
     def test_external_http_links_get_new_tab_protections(self):
         for url in ("http://example.com/a?x=1&y=2", "https://example.com/"):

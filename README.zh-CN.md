@@ -45,6 +45,10 @@ python3 update.py --validate-editorial 1700    # 在临时存储验证单场题�
 
 普通更新命令可以直接初始化空存储。`--rebuild` 表示“尝试元数据中的每一项”，不是“等待全库一起发布”：每个成功替代项独立即时发布。刷新期间，旧的有效文档会一直可读，直到新文档成功写入；确认不存在时只删除对应的过期单项。
 
+网页端 **Rebuild** 明确定义为重试当前跳过的单项：确认对话框用两个可滚动 Tab 分别列出题面和题解、显示数量，并且每一项都可点击跳转。点击确认后，完整预览快照会重新加入对应的内存队列，因此列表会清空；已就绪和已确认不存在的单项保持不变，正在运行的启动爬取会合并而不会重复启动。CLI `--rebuild` 仍是显式强制刷新命令。
+
+阅读器打开可重试但尚不可用的内容时，会单独发送严格的 `POST /api/prioritize` 提示；题面和题解 GET API 仍保持只读。最近一次点击会移到对应内存队列前端：题面在下一次抓取前选中，题解在下一批 8 项形成时选中；已就绪和已确认不存在的内容不会发送提示。
+
 ### 单项状态
 
 - `ready` — 规范文档已验证，且所有引用资源均为本地、摘要有效。
@@ -83,7 +87,7 @@ Node.js 仅用于可选的无依赖阅读器测试：
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --test tests/reader_payload.test.js
-python3 -m py_compile content_model.py content_parser.py content_render.py content_cache.py content_codecs.py statement_model.py statement_parser.py statement_crawl.py statement_rebuild.py editorial_model.py editorial_parser.py editorial_rebuild.py cfcrawl.py server.py update.py
+python3 -m py_compile content_model.py content_parser.py content_render.py content_cache.py content_codecs.py crawl_priority.py statement_model.py statement_parser.py statement_crawl.py statement_rebuild.py editorial_model.py editorial_parser.py editorial_rebuild.py cfcrawl.py server.py update.py
 ```
 
 ## 说明

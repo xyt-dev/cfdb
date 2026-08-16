@@ -10,6 +10,7 @@ from editorial_model import canonical_json
 statement_parser = import_module("statement_parser")
 ParseError = statement_parser.ParseError
 parse_statement_html = statement_parser.parse_statement_html
+render_statement_html = import_module("statement_render").render_statement_html
 
 FIXTURES = Path(__file__).parent / "fixtures" / "statements"
 
@@ -102,6 +103,71 @@ class StatementParserTests(unittest.TestCase):
             expected["sampleOutputText"],
         )
 
+    def test_one_sample_test_wrapper_can_contain_multiple_pairs(self):
+        document = parse_statement_html(
+            """
+            <div class="problem-statement">
+              <div class="header"><div class="title">A. Grouped Samples</div></div>
+              <div class="problem-description"><p>Body</p></div>
+              <div class="sample-tests">
+                <div class="section-title">Examples</div>
+                <div class="sample-test">
+                  <div class="input"><div class="title">Input</div><pre>1</pre></div>
+                  <div class="output"><div class="title">Output</div><pre>one</pre></div>
+                  <div class="input"><div class="title">Input</div><pre>2</pre></div>
+                  <div class="output"><div class="title">Output</div><pre>two</pre></div>
+                  <div class="input"><div class="title">Input</div><pre>3</pre></div>
+                  <div class="output"><div class="title">Output</div><pre>three</pre></div>
+                </div>
+              </div>
+            </div>
+            """,
+            problem_code="1000A",
+            contest_id="1000",
+            index="A",
+            source_url="https://codeforces.com/contest/1000/problem/A",
+        )
+
+        samples = _nodes_with_role(document.root, "sample")
+        self.assertEqual(len(samples), 3)
+        self.assertEqual(
+            [_plain_text(node) for node in _nodes_with_role(document.root, "sample_input")],
+            ["Input1", "Input2", "Input3"],
+        )
+        self.assertEqual(
+            [_plain_text(node) for node in _nodes_with_role(document.root, "sample_output")],
+            ["Outputone", "Outputtwo", "Outputthree"],
+        )
+
+    def test_grouped_sample_wrapper_rejects_malformed_sequences(self):
+        input_node = '<div class="input"><div class="title">Input</div><pre>1</pre></div>'
+        output_node = '<div class="output"><div class="title">Output</div><pre>one</pre></div>'
+        cases = {
+            "output-first": output_node + input_node,
+            "duplicate-input": input_node + input_node + output_node,
+            "trailing-input": input_node,
+            "empty": "",
+            "intervening-node": input_node + "<p>unexpected</p>" + output_node,
+        }
+
+        for name, children in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ParseError, "^invalid-sample-pair$"):
+                    parse_statement_html(
+                        f"""
+                        <div class="problem-statement">
+                          <div class="header"><div class="title">A. Malformed Samples</div></div>
+                          <div class="sample-tests">
+                            <div class="sample-test">{children}</div>
+                          </div>
+                        </div>
+                        """,
+                        problem_code="1000A",
+                        contest_id="1000",
+                        index="A",
+                        source_url="https://codeforces.com/contest/1000/problem/A",
+                    )
+
     def test_localized_labels_do_not_determine_section_identity(self):
         document = self.parse_fixture(
             "localized.html",
@@ -114,6 +180,42 @@ class StatementParserTests(unittest.TestCase):
         self.assertEqual(_roles(document.root), self.expected["localized"]["roles"])
         input_section = _nodes_with_role(document.root, "input_specification")[0]
         self.assertIn("Входные данные", _plain_text(input_section))
+
+    def test_limit_property_titles_restore_visual_colons(self):
+        document = parse_statement_html(
+            """
+            <div class="problem-statement">
+              <div class="header">
+                <div class="title">A. Limits</div>
+                <div class="time-limit">
+                  <div class="property-title">time limit per test</div>1 second
+                </div>
+                <div class="memory-limit">
+                  <div class="property-title">ограничение памяти：</div>256 мегабайт
+                </div>
+              </div>
+              <div class="problem-description"><p>Body</p></div>
+            </div>
+            """,
+            problem_code="1000A",
+            contest_id="1000",
+            index="A",
+            source_url="https://codeforces.com/contest/1000/problem/A",
+        )
+
+        time_limit = _nodes_with_role(document.root, "time_limit")[0]
+        memory_limit = _nodes_with_role(document.root, "memory_limit")[0]
+        self.assertEqual(_plain_text(time_limit).rstrip(), "time limit per test:1 second")
+        self.assertEqual(_plain_text(memory_limit).rstrip(), "ограничение памяти：256 мегабайт")
+        html = render_statement_html(document)
+        self.assertIn(
+            '<div class="cf-time-limit">time limit per test:1 second',
+            html,
+        )
+        self.assertIn(
+            '<div class="cf-memory-limit">ограничение памяти：256 мегабайт',
+            html,
+        )
 
 
     def test_live_preformatted_lines_titles_and_hidden_standard_channels(self):

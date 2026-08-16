@@ -49,6 +49,10 @@ python3 update.py --validate-editorial 1700    # validate one item in a temporar
 
 Plain update commands also initialize empty stores. `--rebuild` means “attempt every metadata item,” not “wait for a whole-dataset release”: each successful replacement is published independently. During a refresh, an existing valid document remains readable until its replacement succeeds. Confirmed absence removes that individual stale document.
 
+The web UI **Rebuild** action explicitly retries the current skipped set: its confirmation dialog shows separate scrollable Statements and Editorials tabs with counts and clickable local navigation. Confirming puts the complete preview snapshot back into the corresponding in-memory queues, so the displayed lists clear; ready and confirmed-absent items remain untouched, and an already-running startup crawl is joined instead of duplicated. CLI `--rebuild` remains the explicit force-refresh command.
+
+Opening retryable unavailable content in the reader sends a separate strict `POST /api/prioritize` hint; statement and editorial GET APIs remain read-only. The latest click moves to the front of its in-memory content queue: statements are selected before the next fetch, while editorials are selected when the next eight-item batch is formed. Ready and confirmed-absent content sends no hint.
+
 ### Item statuses
 
 - `ready` — a validated canonical document exists and every referenced asset is local and digest-valid.
@@ -87,7 +91,7 @@ Node.js is optional and used only for dependency-free reader tests:
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --test tests/reader_payload.test.js
-python3 -m py_compile content_model.py content_parser.py content_render.py content_cache.py content_codecs.py statement_model.py statement_parser.py statement_crawl.py statement_rebuild.py editorial_model.py editorial_parser.py editorial_rebuild.py cfcrawl.py server.py update.py
+python3 -m py_compile content_model.py content_parser.py content_render.py content_cache.py content_codecs.py crawl_priority.py statement_model.py statement_parser.py statement_crawl.py statement_rebuild.py editorial_model.py editorial_parser.py editorial_rebuild.py cfcrawl.py server.py update.py
 ```
 
 ## Notes

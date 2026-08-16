@@ -36,7 +36,7 @@ class ServerAutoUpdateTests(unittest.TestCase):
         calls: list[tuple[str, Path]] = []
 
         def updater(content_kind: str):
-            def crawl(*, cache_root: Path, progress_callback):
+            def crawl(*, cache_root: Path, progress_callback, priority_selector):
                 calls.append((content_kind, Path(cache_root)))
                 barrier.wait(timeout=5)
                 progress_callback(
@@ -93,7 +93,7 @@ class ServerAutoUpdateTests(unittest.TestCase):
         def fail(**_kwargs):
             raise RuntimeError("statement failed")
 
-        def succeed(*, cache_root: Path, progress_callback):
+        def succeed(*, cache_root: Path, progress_callback, priority_selector):
             progress_callback("1700", ContentStatus.READY, 1, 1)
             return report("editorial")
 

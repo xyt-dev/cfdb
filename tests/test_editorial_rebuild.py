@@ -8,6 +8,7 @@ from unittest.mock import patch
 import editorial_rebuild
 from cfcrawl import EditorialBuildResult, TutorialBatch
 from content_cache import ContentStatus, ContentStore  # pyright: ignore[reportMissingImports]
+from crawl_priority import CrawlPriorityQueue  # pyright: ignore[reportMissingImports]
 from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImports]
 from editorial_model import EditorialDocument, Node
 from editorial_rebuild import (
@@ -188,6 +189,38 @@ class EditorialRebuildTests(unittest.TestCase):
             store = ContentStore(directory, EDITORIAL_CODEC)
             self.assertEqual(store.load_document("1700").content_id, "1700")
             self.assertEqual(store.item_status("9999")["status"], "known_absent")
+
+
+    def test_incremental_update_promotes_clicked_contest_into_next_batch(self):
+        source = FixtureEditorialSource(tuple(str(contest_id) for contest_id in range(1701, 1710)))
+        priority = CrawlPriorityQueue()
+
+        def prioritize_after_first_batch(
+            _contest_id: str,
+            _status: ContentStatus,
+            completed: int,
+            _total: int,
+        ) -> None:
+            if completed == 2:
+                priority.prioritize("editorial", "1709")
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            editorial_rebuild, "BATCH_SIZE", 2
+        ):
+            report = update_editorials(
+                source=source,
+                cache_root=directory,
+                delay=0,
+                sleep_fn=lambda _delay: None,
+                progress_callback=prioritize_after_first_batch,
+                priority_selector=lambda remaining: priority.pop_next(
+                    "editorial", remaining
+                ),
+            )
+
+        self.assertTrue(report["completed"])
+        self.assertEqual(set(source.fetches[:4]), {"1701", "1702"})
+        self.assertEqual(set(source.fetches[4:8]), {"1703", "1709"})
 
     def test_failed_contest_is_recorded_and_retried(self):
         failing = FixtureEditorialSource(("1700", "9999"))
