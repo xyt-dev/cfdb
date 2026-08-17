@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [Unreleased]
+
+### 修复
+
+- **题解缺图不再阻止正文发布**：对已审计确认永久失效的 47 个历史图片 URL 使用 typed `missing_asset` 占位，未知资源失败仍保持可重试且不发布；题解资源管线补齐 BMP magic 分类。正常增量重爬后 34 场历史题解恢复，当前题解为 1820 ready、185 confirmed absent、0 transient。
+
 ## [v4.1] - 2026-08-17
 
 ### 新增

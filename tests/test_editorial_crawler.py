@@ -1,4 +1,5 @@
 import hashlib
+import cfcrawl
 import json
 import tempfile
 import unittest
@@ -25,6 +26,21 @@ from content_codecs import EDITORIAL_CODEC  # pyright: ignore[reportMissingImpor
 FIXTURES = Path(__file__).parent / "fixtures" / "editorials"
 SOURCE_URL = "https://codeforces.com/blog/entry/103978"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+BMP_PAYLOAD = (
+    b"BM"
+    + (58).to_bytes(4, "little")
+    + b"\x00\x00\x00\x00"
+    + (54).to_bytes(4, "little")
+    + (40).to_bytes(4, "little")
+    + (1).to_bytes(4, "little", signed=True)
+    + (1).to_bytes(4, "little", signed=True)
+    + (1).to_bytes(2, "little")
+    + (24).to_bytes(2, "little")
+    + b"\x00\x00\x00\x00"
+    + (4).to_bytes(4, "little")
+    + b"\x00" * 16
+    + b"\x00\x00\x00\x00"
+)
 
 
 def fixture(relative: str) -> str:
@@ -392,6 +408,26 @@ class EditorialCrawlerTests(unittest.TestCase):
                 "editorial-asset-transient-failure",
             )
 
+
+    def test_editorial_asset_localizer_accepts_bmp_magic(self):
+        document = document_with_image("https://codeforces.com/images/diagram.bmp")
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = localize_editorial_assets(
+                document,
+                image_dir=directory,
+                image_fetcher=lambda _url: BMP_PAYLOAD,
+            )
+
+            self.assertIs(result.status, ContestStatus.READY)
+            assert result.document is not None
+            route = result.document.root.children[0].attrs["src"]
+            self.assertTrue(route.endswith(".bmp"))
+            self.assertEqual(
+                (Path(directory) / route.rsplit("/", 1)[-1]).read_bytes(),
+                BMP_PAYLOAD,
+            )
+
     def test_confirmed_missing_image_becomes_missing_asset(self):
         document = document_with_image("https://codeforces.com/images/diagram.svg")
 
@@ -401,6 +437,41 @@ class EditorialCrawlerTests(unittest.TestCase):
                 image_dir=directory,
                 image_fetcher=lambda _url: (_ for _ in ()).throw(
                     AssertionError("SVG must not be downloaded")
+                ),
+            )
+
+            self.assertIs(result.status, ContestStatus.READY)
+            assert result.document is not None
+            self.assertEqual(result.document.root.children[0].kind, "missing_asset")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            self.assertIn(
+                "editorial-asset-unsupported",
+                [item.code for item in result.document.diagnostics],
+            )
+
+
+    def test_audited_missing_raster_becomes_placeholder_without_fetch(self):
+        source = "https://s40.radikal.ru/i089/1006/10/c50af7e13d4d.png"
+        missing_sources = getattr(
+            cfcrawl,
+            "CONFIRMED_MISSING_EDITORIAL_ASSET_URLS",
+            frozenset(),
+        )
+        self.assertEqual(len(missing_sources), 47)
+        self.assertEqual(
+            hashlib.sha256("\n".join(sorted(missing_sources)).encode()).hexdigest(),
+            "341f56379c4decbb558ced169c4078ddf67ec7aa12fff8bbde0789094311e438",
+        )
+        self.assertIn(source, missing_sources)
+        self.assertNotIn("https://codeforces.com/images/diagram.png", missing_sources)
+        document = document_with_image(source)
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = localize_editorial_assets(
+                document,
+                image_dir=directory,
+                image_fetcher=lambda _url: (_ for _ in ()).throw(
+                    AssertionError("audited missing asset must not be downloaded")
                 ),
             )
 

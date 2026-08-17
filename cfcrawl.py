@@ -16,6 +16,9 @@ from content_assets import (  # pyright: ignore[reportMissingImports]
     localize_content_assets,
 )
 from content_cache import ContentStatus  # pyright: ignore[reportMissingImports]
+from editorial_missing_assets import (  # pyright: ignore[reportMissingImports]
+    CONFIRMED_MISSING_EDITORIAL_ASSET_URLS,
+)
 from editorial_model import Diagnostic, EditorialDocument, Node, validate_document
 from editorial_parser import ParseError, compose_tutorials, parse_blog_html, parse_tutorial_fragment  # pyright: ignore[reportAttributeAccessIssue]
 
@@ -354,6 +357,8 @@ def localize_editorial_assets(
             media_type = "image/gif"
         elif len(fetched) >= 12 and fetched.startswith(b"RIFF") and fetched[8:12] == b"WEBP":
             media_type = "image/webp"
+        elif fetched.startswith(b"BM"):
+            media_type = "image/bmp"
         else:
             media_type = "application/octet-stream"
         return AssetFetchResult(fetched, media_type)
@@ -369,6 +374,7 @@ def localize_editorial_assets(
                 allow_pdf_attachment=False,
                 max_bytes=20 * 1024 * 1024,
             ),
+            known_missing_image_sources=CONFIRMED_MISSING_EDITORIAL_ASSET_URLS,
         )
     except AssetError as error:
         diagnostic = Diagnostic(

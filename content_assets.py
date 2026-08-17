@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Collection
 from dataclasses import dataclass
 import errno
 import hashlib
@@ -677,9 +678,14 @@ def _unsupported_image(node: ContentNode, document: SemanticDocument, path: str)
     return ContentNode(kind="missing_asset", attrs={"alt": str(node.attrs.get("alt", ""))})
 
 
-def _image_is_known_unsupported(node: ContentNode) -> bool:
+def _image_is_known_unsupported(
+    node: ContentNode,
+    known_missing_image_sources: Collection[str],
+) -> bool:
     value = node.attrs.get("src")
     if not isinstance(value, str):
+        return True
+    if value in known_missing_image_sources:
         return True
     try:
         path = unquote(urlsplit(value).path)
@@ -695,6 +701,7 @@ def localize_content_assets(
     route_prefix: str,
     fetcher: Callable[[str], AssetFetchResult],
     policy: AssetPolicy,
+    known_missing_image_sources: Collection[str] = (),
 ) -> SemanticDocument:
     expected_prefix = _ROUTE_PREFIXES.get(document.content_kind)
     if route_prefix != expected_prefix:
@@ -705,7 +712,10 @@ def localize_content_assets(
 
     def transform(node: ContentNode, path: str) -> ContentNode:
         if node.kind in {"image", "attachment"}:
-            if node.kind == "image" and _image_is_known_unsupported(node):
+            if node.kind == "image" and _image_is_known_unsupported(
+                node,
+                known_missing_image_sources,
+            ):
                 return _unsupported_image(node, localized, path)
             source = _remote_resource_url(node)
             try:
