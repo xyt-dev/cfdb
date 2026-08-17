@@ -114,10 +114,27 @@ class ServerAutoUpdateTests(unittest.TestCase):
             ), patch.object(server, "_reload_problems"):
                 server.auto_update()
 
-        self.assertEqual(server.crawl_state["stage"], "done")
+        self.assertEqual(server.crawl_state["stage"], "error")
+        self.assertEqual(server.crawl_state["error"], "auto-update failed: statement")
         self.assertEqual(server.crawl_state["contentStatus"]["statement"], "error")
         self.assertEqual(server.crawl_state["contentStatus"]["editorial"], "complete")
         self.assertIn("statement failed", server.crawl_state["content"]["statement"]["error"])
+
+    def test_startup_waits_for_active_manual_operation(self):
+        with patch.object(
+            server,
+            "_acquire_crawl_operation",
+            side_effect=[False, True],
+        ) as acquire, patch("server.time.sleep") as sleep, patch.object(
+            server, "_auto_update"
+        ) as update, patch.object(server, "_finish_crawl_operation") as finish:
+            self.assertTrue(server.auto_update())
+
+        self.assertEqual(acquire.call_count, 2)
+        acquire.assert_called_with(defer_rebuild=False)
+        sleep.assert_called_once_with(0.1)
+        update.assert_called_once_with()
+        finish.assert_called_once_with()
 
     def test_metadata_failure_stops_content_crawls_without_creating_roots(self):
         with tempfile.TemporaryDirectory() as directory:

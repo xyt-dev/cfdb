@@ -2,6 +2,8 @@ import hashlib
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 from cfcrawl import (
@@ -10,6 +12,7 @@ from cfcrawl import (
     build_editorial_document,
     fetch_editorial_v2,
     localize_editorial_assets,
+    _fetch_problem_tutorial_fragments,
 )
 from content_cache import (  # pyright: ignore[reportMissingImports]
     ContentStatus as ContestStatus,
@@ -68,6 +71,59 @@ def document_with_image(source: str) -> EditorialDocument:
 
 
 class EditorialCrawlerTests(unittest.TestCase):
+    def test_tutorial_bootstrap_uses_problem_from_requested_contest(self):
+        commands = []
+
+        def run(command, **_kwargs):
+            commands.append(command)
+            if command[-1].startswith("https://codeforces.com/contest/"):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=b"<html data-csrf='0123456789abcdef0123456789abcdef'>",
+                )
+            return SimpleNamespace(returncode=0, stdout=b'{"success": false}')
+
+        with patch("cfcrawl.subprocess.run", side_effect=run), patch(
+            "cfcrawl.time.sleep"
+        ):
+            batch = _fetch_problem_tutorial_fragments(
+                "1129",
+                ["1130A", "1129A2"],
+            )
+
+        self.assertEqual(
+            commands[0][-1],
+            "https://codeforces.com/contest/1129/problem/A2",
+        )
+        self.assertEqual(batch.missing_codes, {"1130A", "1129A2"})
+        self.assertEqual(batch.transient_errors, [])
+
+    def test_tutorial_bootstrap_falls_back_to_contest_page_for_alias_codes(self):
+        commands = []
+
+        def run(command, **_kwargs):
+            commands.append(command)
+            if command[-1].startswith("https://codeforces.com/contest/"):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=b"<html data-csrf='0123456789abcdef0123456789abcdef'>",
+                )
+            return SimpleNamespace(returncode=0, stdout=b'{"success": false}')
+
+        with patch("cfcrawl.subprocess.run", side_effect=run), patch(
+            "cfcrawl.time.sleep"
+        ):
+            batch = _fetch_problem_tutorial_fragments(
+                "1784",
+                ["1786A2", "1785A"],
+            )
+
+        self.assertEqual(
+            commands[0][-1],
+            "https://codeforces.com/contest/1784",
+        )
+        self.assertEqual(batch.missing_codes, {"1786A2", "1785A"})
+        self.assertEqual(batch.transient_errors, [])
     def test_build_editorial_document_composes_1700_a_through_f(self):
         expected = json.loads(fixture("1700/expected.json"))
 

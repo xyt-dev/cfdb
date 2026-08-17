@@ -212,6 +212,13 @@
         transition: width 0.5s;
       }
 
+      .filter-actions {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin: 0;
+      }
       .filters {
         background: var(--surface);
         border-radius: var(--radius);
@@ -222,7 +229,6 @@
         gap: 10px;
         align-items: end;
         border: 1px solid var(--border);
-        position: relative; /* 迷你按钮右上角定位 */
       }
       .filters label {
         display: block;
@@ -236,6 +242,9 @@
       }
       .filters > div {
         min-height: 58px; /* 冗余高度：中英切换不影响整体高度 */
+      }
+      .filters > .filter-actions {
+        min-height: 24px;
       }
       /* 数字输入框去掉上下增减按钮（Chrome/Edge spin button + Firefox 原生） */
       input[type="number"]::-webkit-inner-spin-button,
@@ -310,9 +319,8 @@
         color: var(--accent);
       }
       .reset-btn.mini {
-        position: absolute;
-        top: 10px;
-        right: 10px;
+        position: static;
+        flex: 0 0 88px;
         width: 88px; /* 固定宽度：Default/默认 切换不变 */
         text-align: center;
         height: 24px; /* 固定高度：中英字体行高差异不影响 */
@@ -322,14 +330,14 @@
         border-radius: 5px;
         background: transparent;
         color: var(--subtext);
-        z-index: 1;
+      }
+      .reset-btn.mini.rebuild-btn {
+        flex-basis: 138px;
+        width: 138px;
       }
       .reset-btn.mini:hover {
         color: var(--text);
         border-color: var(--accent);
-      }
-      .reset-btn.mini.rebuild-btn {
-        right: 108px;
       }
       .reset-btn.mini:disabled {
         cursor: not-allowed;
@@ -831,23 +839,25 @@
       </div>
 
       <div class="filters">
-        <button
-          id="rebuild-btn"
-          class="reset-btn mini rebuild-btn"
-          data-i18n-title="rebuildTitle"
-          title="Retry missing and failed content"
-          onclick="requestRebuild(this)"
-        >
-          <span data-i18n="rebuild">Rebuild</span>
-        </button>
-        <button
-          class="reset-btn mini"
-          data-i18n-title="resetTitle"
-          title="Reset filters"
-          onclick="resetFilters()"
-        >
-          <span data-i18n="reset">Default</span>
-        </button>
+        <div class="filter-actions">
+          <button
+            id="rebuild-btn"
+            class="reset-btn mini rebuild-btn"
+            data-i18n-title="pendingCrawlListTitle"
+            title="Show pending crawl list"
+            onclick="requestRebuild(this)"
+          >
+            <span data-i18n="pendingCrawlList">Pending Crawl List</span>
+          </button>
+          <button
+            class="reset-btn mini"
+            data-i18n-title="resetTitle"
+            title="Reset filters"
+            onclick="resetFilters()"
+          >
+            <span data-i18n="reset">Default</span>
+          </button>
+        </div>
         <div>
           <label data-i18n="ratingMin">Min Rating</label
           ><input
@@ -1067,6 +1077,8 @@
           contentUpdating: "Updating content...",
           rebuild: "Rebuild",
           rebuildTitle: "Retry all skipped content",
+          pendingCrawlList: "Pending Crawl List",
+          pendingCrawlListTitle: "Show pending crawl list",
           rebuildDialogTitle: "Retry skipped content",
           rebuildConfirm:
             "Force-retry every currently skipped statement and editorial shown below. Ready content is not changed.",
@@ -1156,6 +1168,8 @@
           contentUpdating: "内容更新中...",
           rebuild: "重建",
           rebuildTitle: "重爬所有跳过内容",
+          pendingCrawlList: "待爬列表",
+          pendingCrawlListTitle: "查看待爬内容列表",
           rebuildDialogTitle: "重爬跳过内容",
           rebuildConfirm:
             "强制重爬下面列出的所有当前跳过的题面和题解；已就绪内容不会改变。",

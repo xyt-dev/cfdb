@@ -194,27 +194,25 @@ class _StatementMapper:
             if child.tag == "#text" and not child.text.strip():
                 continue
             classes = class_tokens(child)
+            if pending_input is not None:
+                if "output" in classes:
+                    samples.children.append(self._make_sample(pending_input, child))
+                    pending_input = None
+                    continue
+                raise ParseError("invalid-sample-pair")
             if "section-title" in classes:
                 mapped = self._map_node(child)
                 if mapped is not None:
                     samples.children.append(mapped)
                 continue
             if "sample-test" in classes:
-                if pending_input is not None:
-                    raise ParseError("unpaired-sample-input")
                 samples.children.extend(self._map_explicit_samples(child))
                 continue
             if "input" in classes:
-                if pending_input is not None:
-                    raise ParseError("unpaired-sample-input")
                 pending_input = child
                 continue
             if "output" in classes:
-                if pending_input is None:
-                    raise ParseError("unpaired-sample-output")
-                samples.children.append(self._make_sample(pending_input, child))
-                pending_input = None
-                continue
+                raise ParseError("unpaired-sample-output")
             mapped = self._map_node(child)
             if mapped is not None:
                 samples.children.append(mapped)
@@ -227,6 +225,8 @@ class _StatementMapper:
         pending_input: SourceNode | None = None
         for child in source.children:
             if child.tag == "#text" and not child.text.strip():
+                continue
+            if child.tag == "br":
                 continue
             classes = class_tokens(child)
             if "input" in classes:
@@ -241,7 +241,7 @@ class _StatementMapper:
                 pending_input = None
                 continue
             raise ParseError("invalid-sample-pair")
-        if pending_input is not None or not samples:
+        if pending_input is not None:
             raise ParseError("invalid-sample-pair")
         return samples
 

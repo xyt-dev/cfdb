@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
@@ -93,19 +94,38 @@ def _utc_now() -> str:
 
 
 def _is_recognized(body: str) -> bool:
-    if not body.strip():
+    stripped = body.strip()
+    if not stripped:
         return False
-    lowered = body.lower()
-    return not any(
-        marker in lowered
-        for marker in (
-            "403 forbidden",
-            "just a moment",
-            "contest not found",
-            "does not exist",
-            "nginx/",
+
+    def has_error_signature(value: str) -> bool:
+        lowered = re.sub(r"<[^>]+>", " ", value).lower()
+        if any(
+            marker in lowered
+            for marker in (
+                "403 forbidden",
+                "just a moment",
+                "contest not found",
+                "nginx/",
+            )
+        ):
+            return True
+        return "does not exist" in lowered and any(
+            subject in lowered
+            for subject in ("blog entry", "contest", "page", "problem")
         )
-    )
+
+    if not stripped.startswith("<"):
+        return not has_error_signature(stripped[:4096])
+    error_scopes = [
+        match.group(1)
+        for match in re.finditer(
+            r"<(?:title|h1)\b[^>]*>(.*?)</(?:title|h1)\s*>",
+            body,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    ]
+    return not any(has_error_signature(scope) for scope in error_scopes)
 
 
 class _LiveEditorialSource:
@@ -410,11 +430,12 @@ def _requested_contests(
     *,
     force: bool,
     requested_ids: set[str],
+    validate_documents: bool = True,
 ) -> list[str]:
     expected = set(contest_ids)
     if not requested_ids.issubset(expected):
         raise ValueError("requested contest is absent from metadata")
-    ready = store.ready_ids()
+    ready = store.ready_ids() if validate_documents else store.document_ids()
     selected: list[str] = []
     for contest_id in contest_ids:
         if force or contest_id in requested_ids:
@@ -445,6 +466,7 @@ def pending_editorial_ids(
     *,
     source: EditorialSource | None = None,
     cache_root: str | os.PathLike[str] | None = None,
+    validate_documents: bool = True,
 ) -> list[str]:
     active_source = source or _LiveEditorialSource()
     root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
@@ -454,6 +476,7 @@ def pending_editorial_ids(
         contest_ids,
         force=False,
         requested_ids=set(),
+        validate_documents=validate_documents,
     )
 
 

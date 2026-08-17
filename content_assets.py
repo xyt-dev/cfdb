@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlsplit
 
 from content_codecs import codec_for_kind  # pyright: ignore[reportMissingImports]
 from content_model import ContentNode, Diagnostic, SemanticDocument
+from content_asset_policy import asset_magic_is_valid  # pyright: ignore[reportMissingImports]
 
 
 class AssetError(ValueError):
@@ -41,7 +42,11 @@ _RASTER_MEDIA_TYPES = {
     ".jpg": {"image/jpeg", "image/jpg"},
     ".gif": {"image/gif"},
     ".webp": {"image/webp"},
+    ".bmp": {"image/bmp", "image/x-bmp", "image/x-ms-bmp"},
 }
+_ALL_RASTER_MEDIA_TYPES = frozenset(
+    media_type for media_types in _RASTER_MEDIA_TYPES.values() for media_type in media_types
+)
 _ROUTE_PREFIXES = {
     "editorial": "/editorial-assets",
     "statement": "/statement-assets",
@@ -61,6 +66,8 @@ def _raster_extension(payload: bytes) -> str | None:
         return ".gif"
     if len(payload) >= 12 and payload.startswith(b"RIFF") and payload[8:12] == b"WEBP":
         return ".webp"
+    if payload.startswith(b"BM") and asset_magic_is_valid("bmp", payload):
+        return ".bmp"
     return None
 
 
@@ -583,7 +590,7 @@ def _validate_fetched_asset(
     extension = _raster_extension(payload)
     if extension is None:
         raise AssetError("invalid-raster-magic")
-    if media_type not in _RASTER_MEDIA_TYPES[extension]:
+    if media_type not in _ALL_RASTER_MEDIA_TYPES:
         raise AssetError("invalid-raster-media-type")
     return extension, payload
 

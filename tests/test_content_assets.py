@@ -22,6 +22,38 @@ PNG_PAYLOAD = b"\x89PNG\r\n\x1a\nsynthetic"
 PDF_PAYLOAD = b"%PDF-1.7\nsynthetic"
 
 
+BMP_PAYLOAD = (
+    b"BM"
+    + (58).to_bytes(4, "little")
+    + b"\x00\x00\x00\x00"
+    + (54).to_bytes(4, "little")
+    + (40).to_bytes(4, "little")
+    + (1).to_bytes(4, "little", signed=True)
+    + (1).to_bytes(4, "little", signed=True)
+    + (1).to_bytes(2, "little")
+    + (24).to_bytes(2, "little")
+    + b"\x00\x00\x00\x00"
+    + (4).to_bytes(4, "little")
+    + b"\x00" * 16
+    + b"\x00\x00\x00\x00"
+)
+BMP_SIZE_OVERCOUNT_PAYLOAD = (
+    BMP_PAYLOAD[:2] + (len(BMP_PAYLOAD) + 1).to_bytes(4, "little") + BMP_PAYLOAD[6:]
+)
+
+
+def _indexed_bmp_payload(*, colors_used: int, palette_entries: int) -> bytes:
+    header = bytearray(BMP_PAYLOAD[:54])
+    header[28:30] = (8).to_bytes(2, "little")
+    header[46:50] = colors_used.to_bytes(4, "little")
+    palette = b"\x00\x00\x00\x00" * palette_entries
+    pixels = BMP_PAYLOAD[54:]
+    payload = header + palette + pixels
+    payload[2:6] = len(payload).to_bytes(4, "little")
+    payload[10:14] = (54 + len(palette)).to_bytes(4, "little")
+    return bytes(payload)
+
+
 def _png_chunk(chunk_type: bytes, body: bytes) -> bytes:
     checksum = zlib.crc32(chunk_type + body) & 0xFFFFFFFF
     return (
@@ -208,6 +240,118 @@ class ContentAssetsTests(unittest.TestCase):
 
             self.assertEqual(first_resource(localized).attrs["src"], route)
             self.assertEqual((Path(directory) / f"{digest}.png").read_bytes(), PNG_PAYLOAD)
+
+
+    def test_raster_uses_magic_extension_when_upstream_image_subtype_is_wrong(self):
+        source = make_editorial_image("https://codeforces.com/image.png")
+        with tempfile.TemporaryDirectory() as directory:
+            localized = localize_content_assets(
+                source,
+                generation_asset_dir=directory,
+                route_prefix="/editorial-assets",
+                fetcher=lambda _url: AssetFetchResult(b"\xff\xd8\xff\x00", "image/png"),
+                policy=RASTER_POLICY,
+            )
+
+        self.assertTrue(first_resource(localized).attrs["src"].endswith(".jpg"))
+
+    def test_raster_accepts_structurally_valid_bmp_payload(self):
+        source = make_statement_image("https://codeforces.com/image.png")
+        with tempfile.TemporaryDirectory() as directory:
+            localized = localize_content_assets(
+                source,
+                generation_asset_dir=directory,
+                route_prefix="/statement-assets",
+                fetcher=lambda _url: AssetFetchResult(BMP_PAYLOAD, "image/png"),
+                policy=RASTER_POLICY,
+            )
+
+            route = first_resource(localized).attrs["src"]
+            self.assertTrue(route.endswith(".bmp"))
+            self.assertEqual(
+                (Path(directory) / route.rsplit("/", 1)[-1]).read_bytes(),
+                BMP_PAYLOAD,
+            )
+
+
+    def test_raster_accepts_codeforces_bmp_one_byte_size_overcount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            localized = localize_content_assets(
+                make_statement_image("https://codeforces.com/image.bmp"),
+                generation_asset_dir=directory,
+                route_prefix="/statement-assets",
+                fetcher=lambda _url: AssetFetchResult(
+                    BMP_SIZE_OVERCOUNT_PAYLOAD,
+                    "image/x-ms-bmp",
+                ),
+                policy=RASTER_POLICY,
+            )
+
+        self.assertTrue(first_resource(localized).attrs["src"].endswith(".bmp"))
+
+
+    def test_raster_accepts_indexed_bmp_with_declared_palette(self):
+        payload = _indexed_bmp_payload(colors_used=1, palette_entries=1)
+        with tempfile.TemporaryDirectory() as directory:
+            localized = localize_content_assets(
+                make_statement_image("https://codeforces.com/image.bmp"),
+                generation_asset_dir=directory,
+                route_prefix="/statement-assets",
+                fetcher=lambda _url: AssetFetchResult(payload, "image/x-ms-bmp"),
+                policy=RASTER_POLICY,
+            )
+
+        self.assertTrue(first_resource(localized).attrs["src"].endswith(".bmp"))
+
+
+    def test_raster_rejects_structurally_impossible_bmp_payloads(self):
+        truncated = bytearray(BMP_PAYLOAD[:55])
+        truncated[2:6] = len(truncated).to_bytes(4, "little")
+        zero_size = bytearray(BMP_PAYLOAD)
+        zero_size[2:6] = (0).to_bytes(4, "little")
+        negative_width = bytearray(BMP_PAYLOAD)
+        negative_width[18:22] = (-1).to_bytes(4, "little", signed=True)
+        compressed = bytearray(BMP_PAYLOAD)
+        compressed[30:34] = (1).to_bytes(4, "little")
+        cases = {
+            "truncated-pixel-data": bytes(truncated),
+            "zero-declared-size": bytes(zero_size),
+            "negative-width": bytes(negative_width),
+            "unsupported-compression": bytes(compressed),
+            "missing-indexed-color-table": _indexed_bmp_payload(
+                colors_used=0,
+                palette_entries=0,
+            ),
+            "truncated-indexed-color-table": _indexed_bmp_payload(
+                colors_used=2,
+                palette_entries=1,
+            ),
+        }
+
+        for name, payload in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(AssetError, "^invalid-raster-magic$"):
+                    localize_content_assets(
+                        make_statement_image("https://codeforces.com/image.bmp"),
+                        generation_asset_dir=directory,
+                        route_prefix="/statement-assets",
+                        fetcher=lambda _url, value=payload: AssetFetchResult(
+                            value,
+                            "image/x-ms-bmp",
+                        ),
+                        policy=RASTER_POLICY,
+                    )
+
+    def test_raster_rejects_non_image_media_type_even_with_valid_magic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(AssetError, "^invalid-raster-media-type$"):
+                localize_content_assets(
+                    make_editorial_image("https://codeforces.com/image.png"),
+                    generation_asset_dir=directory,
+                    route_prefix="/editorial-assets",
+                    fetcher=lambda _url: AssetFetchResult(PNG_PAYLOAD, "text/html"),
+                    policy=RASTER_POLICY,
+                )
 
 
     def test_transparent_png_is_flattened_before_digest_for_all_content_kinds(self):

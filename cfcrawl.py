@@ -185,26 +185,46 @@ def _tutorial_batch_from_responses(codes, fetch_tutorial) -> TutorialBatch:
     return TutorialBatch(html_by_code, missing_codes, transient_errors)
 
 
+def _tutorial_problem_index(cid: str, codes: list[str]) -> str | None:
+    for code in codes:
+        if not code.startswith(cid):
+            continue
+        index = code[len(cid):]
+        if index.startswith("/"):
+            index = index[1:]
+        elif index and index[0].isdigit():
+            continue
+        if index:
+            return index
+    return None
+
+
 def _fetch_problem_tutorial_fragments(cid: str, codes: list[str]) -> TutorialBatch:
     if not codes:
         return TutorialBatch({}, set(), [])
 
+    bootstrap_index = _tutorial_problem_index(cid, codes)
+    bootstrap_url = f"https://codeforces.com/contest/{cid}"
+    if bootstrap_index is not None:
+        bootstrap_url += f"/problem/{bootstrap_index}"
+
     descriptor, jar = tempfile.mkstemp(prefix=f"cfdb-{cid}-", suffix=".cookies")
     os.close(descriptor)
     try:
-        idx0 = codes[0][len(cid):]
         try:
             page_result = subprocess.run(
-                [CURL, "-s", "-c", jar, "--max-time", "20",
+                [CURL, "-sL", "--compressed", "-c", jar, "--max-time", "20",
                  "-H", f"User-Agent: {UA}",
-                 f"https://codeforces.com/contest/{cid}/problem/{idx0}"],
+                 bootstrap_url],
                 capture_output=True,
                 timeout=30,
             )
+            if page_result.returncode != 0 or not page_result.stdout:
+                return TutorialBatch({}, set(), ["csrf-page-fetch-failed"])
             page = page_result.stdout.decode("utf-8", "replace")
         except Exception:
             return TutorialBatch({}, set(), ["csrf-page-fetch-failed"])
-        match = re.search(r"data-csrf='([a-f0-9]+)'", page)
+        match = re.search(r"data-csrf\s*=\s*['\"]([a-f0-9]+)['\"]", page)
         if match is None:
             return TutorialBatch({}, set(), ["csrf-token-unavailable"])
         token = match.group(1)

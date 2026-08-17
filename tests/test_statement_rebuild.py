@@ -84,6 +84,33 @@ class FixtureStatementSource:
 
 
 class StatementRebuildTests(unittest.TestCase):
+    def test_pending_preview_can_skip_ready_document_validation(self):
+        source = FixtureStatementSource(
+            {
+                ("1700", "A"): statement_html("A", "A body"),
+                ("1700", "B"): statement_html("B", "B body"),
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = ContentStore.initialize(directory, STATEMENT_CODEC)
+            store.document_path("1700A").write_text("{}", encoding="utf-8")
+            with patch.object(
+                ContentStore,
+                "ready_ids",
+                side_effect=AssertionError("preview validated ready documents"),
+            ):
+                pending = statement_rebuild.pending_statement_ids(
+                    source=source,
+                    cache_root=directory,
+                    validate_documents=False,
+                )
+            validated_pending = statement_rebuild.pending_statement_ids(
+                source=source,
+                cache_root=directory,
+            )
+
+        self.assertEqual(pending, ["1700B"])
+        self.assertEqual(validated_pending, ["1700A", "1700B"])
     def test_first_problem_is_readable_before_later_problem_is_crawled(self):
         source = FixtureStatementSource(
             {

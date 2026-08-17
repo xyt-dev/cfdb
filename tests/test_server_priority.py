@@ -144,10 +144,19 @@ class ServerPriorityTests(unittest.TestCase):
         ]
         with patch.object(server, "PROBLEMS", problems), patch.object(
             server, "pending_statement_ids", return_value=["1605E", "1605D"]
-        ), patch.object(
+        ) as pending_statements, patch.object(
             server, "pending_editorial_ids", return_value=["1605"]
-        ), patch.object(server, "_crawl_priority", queue):
+        ) as pending_editorials, patch.object(server, "_crawl_priority", queue):
             preview = server._build_rebuild_preview()
+
+        pending_statements.assert_called_once_with(
+            cache_root=server.STATEMENT_V2_ROOT,
+            validate_documents=False,
+        )
+        pending_editorials.assert_called_once_with(
+            cache_root=server.EDITORIAL_V2_ROOT,
+            validate_documents=False,
+        )
 
         self.assertEqual(
             preview["statements"],

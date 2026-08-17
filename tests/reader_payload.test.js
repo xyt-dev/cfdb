@@ -281,15 +281,46 @@ test("iframe syntax highlighting colors Q# but skips statement samples", () => {
 	assert.equal(plain.innerHTML, "1 2\n3 4\n");
 });
 
-test("rebuild control uses a themed floating dialog left of Default", () => {
+test("rebuild and default controls use a dedicated filter-card row", () => {
 	const source = fs.readFileSync(
 		path.join(__dirname, "..", "index.html"),
 		"utf8",
 	);
+	const filtersPosition = source.indexOf('<div class="filters">');
+	const actionsPosition = source.indexOf('<div class="filter-actions">');
 	const rebuildPosition = source.indexOf('id="rebuild-btn"');
 	const defaultPosition = source.indexOf('onclick="resetFilters()"');
-	assert.ok(rebuildPosition >= 0);
-	assert.ok(defaultPosition > rebuildPosition);
+	const actionsEnd = source.indexOf("</div>", defaultPosition);
+	const firstFieldPosition = source.indexOf(
+		'<label data-i18n="ratingMin"',
+		actionsEnd,
+	);
+	assert.match(source, /<div class="filters">\s*<div class="filter-actions">/);
+	assert.ok(
+		filtersPosition >= 0 &&
+			filtersPosition < actionsPosition &&
+			actionsPosition < rebuildPosition &&
+			rebuildPosition < defaultPosition &&
+			defaultPosition < actionsEnd &&
+			actionsEnd < firstFieldPosition,
+	);
+	const actionsMarkup = source.slice(actionsPosition, actionsEnd);
+	assert.match(actionsMarkup, /onclick="requestRebuild\(this\)"/);
+	assert.match(actionsMarkup, /onclick="resetFilters\(\)"/);
+	assert.match(actionsMarkup, /data-i18n="pendingCrawlList"/);
+	assert.match(actionsMarkup, /data-i18n-title="pendingCrawlListTitle"/);
+	assert.match(source, /pendingCrawlList:\s*"Pending Crawl List"/);
+	assert.match(source, /pendingCrawlList:\s*"待爬列表"/);
+	assert.match(source, /\.reset-btn\.mini\.rebuild-btn\s*\{[^}]*width:\s*138px/);
+	assert.match(source, /\.filter-actions\s*\{[^}]*display:\s*flex/);
+	assert.match(source, /\.filter-actions\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+	assert.match(source, /\.filter-actions\s*\{[^}]*justify-content:\s*flex-end/);
+	assert.match(source, /\.filter-actions\s*\{[^}]*gap:\s*10px/);
+	assert.match(
+		source,
+		/\.filters\s*>\s*\.filter-actions\s*\{[^}]*min-height:\s*24px/,
+	);
+	assert.match(source, /\.reset-btn\.mini\s*\{[^}]*position:\s*static/);
 	assert.match(source, /class="reset-btn mini rebuild-btn"/);
 	assert.match(source, /<dialog[\s\S]*id="rebuild-dialog"/);
 	assert.match(source, /\.rebuild-dialog::backdrop/);

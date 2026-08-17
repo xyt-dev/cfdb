@@ -118,11 +118,33 @@ class ServerRebuildTests(unittest.TestCase):
             calls,
             [("statement", statement_root), ("editorial", editorial_root)],
         )
-        self.assertEqual(server.crawl_state["stage"], "done")
+        self.assertEqual(server.crawl_state["stage"], "content")
         self.assertEqual(
             server.crawl_state["contentStatus"],
             {"statement": "complete", "editorial": "complete"},
         )
+
+    def test_finish_publishes_done_only_without_followup(self):
+        operation_lock = Mock()
+        with server._crawl_state_lock:
+            original = copy.deepcopy(server.crawl_state)
+            server.crawl_state.clear()
+            server.crawl_state.update(stage="content")
+        try:
+            with patch.object(
+                server, "_crawl_operation_lock", operation_lock
+            ), patch.object(
+                server, "_rebuild_followup_requested", False, create=True
+            ):
+                getattr(server, "_finish_crawl_operation")()
+
+            self.assertEqual(server._progress_snapshot()["stage"], "done")
+        finally:
+            with server._crawl_state_lock:
+                server.crawl_state.clear()
+                server.crawl_state.update(original)
+
+        operation_lock.release.assert_called_once_with()
 
     def test_rebuild_content_exposes_crawler_exception(self):
         def fail(**_kwargs):
@@ -174,6 +196,26 @@ class ServerRebuildTests(unittest.TestCase):
         thread.assert_called_once_with(target=getattr(server, "_rebuild_worker"), daemon=True)
         worker.start.assert_called_once_with()
 
+    def test_active_operation_starts_one_deferred_rebuild_after_completion(self):
+        operation_lock = Mock()
+        operation_lock.acquire.return_value = False
+        worker = Mock()
+        with patch.object(server, "_crawl_operation_lock", operation_lock), patch.object(
+            server, "_rebuild_followup_requested", False, create=True
+        ), patch.object(server, "_begin_content_progress"), patch.object(
+            server.threading, "Thread", return_value=worker
+        ) as thread:
+            self.assertEqual(server.start_rebuild(), "already_running")
+            self.assertTrue(getattr(server, "_rebuild_followup_requested"))
+
+            getattr(server, "_finish_crawl_operation")()
+
+            self.assertFalse(getattr(server, "_rebuild_followup_requested"))
+
+        operation_lock.release.assert_not_called()
+        thread.assert_called_once_with(target=getattr(server, "_rebuild_worker"), daemon=True)
+        worker.start.assert_called_once_with()
+
     def test_start_rebuild_marks_progress_busy_before_worker_starts(self):
         lock = Mock()
         lock.acquire.return_value = True
@@ -221,6 +263,99 @@ class ServerRebuildTests(unittest.TestCase):
                 server.crawl_state.clear()
                 server.crawl_state.update(original)
         lock.release.assert_called_once_with()
+
+    def test_launch_failure_cannot_overwrite_successor_progress(self):
+        operation_lock = Mock()
+        operation_lock.acquire.return_value = True
+        worker = Mock()
+        worker.start.side_effect = RuntimeError("thread start failed")
+
+        def publish_successor_progress():
+            with server._crawl_state_lock:
+                server.crawl_state["stage"] = "content"
+
+        operation_lock.release.side_effect = publish_successor_progress
+        with server._crawl_state_lock:
+            original = copy.deepcopy(server.crawl_state)
+            server.crawl_state.clear()
+            server.crawl_state.update(stage="idle")
+        try:
+            with patch.object(
+                server, "_crawl_operation_lock", operation_lock
+            ), patch.object(
+                server, "_rebuild_followup_requested", False, create=True
+            ), patch.object(server.threading, "Thread", return_value=worker):
+                with self.assertRaisesRegex(RuntimeError, "thread start failed"):
+                    server.start_rebuild()
+
+            self.assertEqual(server._progress_snapshot()["stage"], "content")
+        finally:
+            with server._crawl_state_lock:
+                server.crawl_state.clear()
+                server.crawl_state.update(original)
+
+        operation_lock.release.assert_called_once_with()
+
+    def test_thread_start_failure_fulfills_concurrent_deferred_request(self):
+        operation_lock = Mock()
+        operation_lock.acquire.return_value = True
+        worker = Mock()
+
+        def fail_after_concurrent_request():
+            setattr(server, "_rebuild_followup_requested", True)
+            raise RuntimeError("thread start failed")
+
+        worker.start.side_effect = fail_after_concurrent_request
+        with server._crawl_state_lock:
+            original = copy.deepcopy(server.crawl_state)
+        try:
+            with patch.object(
+                server, "_crawl_operation_lock", operation_lock
+            ), patch.object(
+                server, "_rebuild_followup_requested", False, create=True
+            ), patch.object(server, "_begin_content_progress"), patch.object(
+                server.threading, "Thread", return_value=worker
+            ), patch.object(server, "_rebuild_content") as rebuild_content:
+                self.assertEqual(server.start_rebuild(), "started")
+                self.assertFalse(getattr(server, "_rebuild_followup_requested"))
+
+            rebuild_content.assert_called_once_with()
+        finally:
+            with server._crawl_state_lock:
+                server.crawl_state.clear()
+                server.crawl_state.update(original)
+
+        operation_lock.release.assert_called_once_with()
+
+    def test_repeated_deferred_launch_failures_do_not_recurse(self):
+        failures = 1100
+        operation_lock = Mock()
+        launch = Mock(
+            side_effect=[
+                *(RuntimeError("thread start failed") for _ in range(failures)),
+                None,
+            ]
+        )
+
+        def request_another_followup():
+            setattr(server, "_rebuild_followup_requested", True)
+
+        with patch.object(
+            server, "_crawl_operation_lock", operation_lock
+        ), patch.object(
+            server, "_rebuild_followup_requested", True, create=True
+        ), patch.object(
+            server, "_launch_rebuild_worker", launch
+        ), patch.object(
+            server, "_rebuild_content", side_effect=request_another_followup
+        ) as rebuild_content, patch("builtins.print"):
+            getattr(server, "_finish_crawl_operation")()
+
+            self.assertFalse(getattr(server, "_rebuild_followup_requested"))
+
+        self.assertEqual(launch.call_count, failures + 1)
+        self.assertEqual(rebuild_content.call_count, failures)
+        operation_lock.release.assert_not_called()
 
     def test_rebuild_worker_releases_lock_on_success_and_failure(self):
         for error in (None, RuntimeError("worker failed")):

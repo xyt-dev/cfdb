@@ -68,11 +68,12 @@ def _requested_identities(
     *,
     force: bool,
     requested_ids: set[str],
+    validate_documents: bool = True,
 ) -> list[ProblemIdentity]:
     expected = {item.problem_code for item in identities}
     if not requested_ids.issubset(expected):
         raise ValueError("requested problem is absent from metadata")
-    ready = store.ready_ids()
+    ready = store.ready_ids() if validate_documents else store.document_ids()
     selected: list[ProblemIdentity] = []
     for identity in identities:
         content_id = identity.problem_code
@@ -104,6 +105,7 @@ def pending_statement_ids(
     *,
     source: StatementSource | None = None,
     cache_root: str | os.PathLike[str] | None = None,
+    validate_documents: bool = True,
 ) -> list[str]:
     active_source = source or LiveStatementSource()
     root = Path(cache_root) if cache_root is not None else DEFAULT_CACHE_ROOT
@@ -113,6 +115,7 @@ def pending_statement_ids(
         identities,
         force=False,
         requested_ids=set(),
+        validate_documents=validate_documents,
     )
     return [identity.problem_code for identity in selected]
 

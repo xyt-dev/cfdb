@@ -7,9 +7,11 @@ from pathlib import Path
 import json
 import copy
 import os
+import stat
 import subprocess
 import sys
 import threading
+import time
 import urllib.parse
 from typing import cast
 
@@ -54,6 +56,8 @@ crawl_state = {
 }
 _crawl_state_lock = threading.Lock()
 _crawl_operation_lock = threading.Lock()
+_crawl_operation_state_lock = threading.Lock()
+_rebuild_followup_requested = False
 _crawl_priority = CrawlPriorityQueue()
 
 
@@ -151,11 +155,17 @@ def _ordered_preview_ids(content_kind: str, content_ids: list[str]) -> list[str]
 def _build_rebuild_preview() -> dict[str, object]:
     statement_ids = _ordered_preview_ids(
         "statement",
-        pending_statement_ids(cache_root=STATEMENT_V2_ROOT),
+        pending_statement_ids(
+            cache_root=STATEMENT_V2_ROOT,
+            validate_documents=False,
+        ),
     )
     editorial_ids = _ordered_preview_ids(
         "editorial",
-        pending_editorial_ids(cache_root=EDITORIAL_V2_ROOT),
+        pending_editorial_ids(
+            cache_root=EDITORIAL_V2_ROOT,
+            validate_documents=False,
+        ),
     )
     statements = _preview_items("statement", statement_ids)
     editorials = _preview_items("editorial", editorial_ids)
@@ -338,8 +348,19 @@ def _auto_update():
             for future in futures:
                 future.result()
         with _crawl_state_lock:
-            crawl_state["stage"] = "done"
-        print("[auto-update] all content crawls finished")
+            failed_kinds = [
+                content_kind
+                for content_kind, status in crawl_state["contentStatus"].items()
+                if status == "error"
+            ]
+            if failed_kinds:
+                crawl_state["stage"] = "error"
+                crawl_state["error"] = "auto-update failed: " + ", ".join(failed_kinds)
+        print(
+            "[auto-update] finished with crawler errors"
+            if failed_kinds
+            else "[auto-update] all content crawls finished"
+        )
     except Exception as error:
         import traceback
 
@@ -350,14 +371,59 @@ def _auto_update():
         traceback.print_exc()
 
 
+def _acquire_crawl_operation(*, defer_rebuild: bool) -> bool:
+    global _rebuild_followup_requested
+    with _crawl_operation_state_lock:
+        if not _crawl_operation_lock.acquire(blocking=False):
+            if defer_rebuild:
+                _rebuild_followup_requested = True
+            return False
+        if defer_rebuild:
+            _rebuild_followup_requested = False
+        return True
+
+
+def _launch_rebuild_worker() -> None:
+    _begin_content_progress()
+    worker = threading.Thread(target=_rebuild_worker, daemon=True)
+    worker.start()
+
+
+def _finish_crawl_operation() -> None:
+    global _rebuild_followup_requested
+    while True:
+        with _crawl_operation_state_lock:
+            if _rebuild_followup_requested:
+                _rebuild_followup_requested = False
+            else:
+                with _crawl_state_lock:
+                    if crawl_state.get("stage") != "error":
+                        crawl_state["stage"] = "done"
+                _crawl_operation_lock.release()
+                return
+        try:
+            _launch_rebuild_worker()
+        except Exception as error:
+            print(
+                f"[rebuild] worker start failed; running deferred crawl synchronously: {error}",
+                flush=True,
+            )
+            _rebuild_content()
+            continue
+        return
+
+
 def auto_update() -> bool:
-    if not _crawl_operation_lock.acquire(blocking=False):
-        print("[auto-update] skipped: another content operation is active")
-        return False
+    waiting = False
+    while not _acquire_crawl_operation(defer_rebuild=False):
+        if not waiting:
+            print("[auto-update] waiting: another content operation is active")
+            waiting = True
+        time.sleep(0.1)
     try:
         _auto_update()
     finally:
-        _crawl_operation_lock.release()
+        _finish_crawl_operation()
     return True
 
 
@@ -390,8 +456,6 @@ def _rebuild_content() -> None:
             if failed_kinds:
                 crawl_state["stage"] = "error"
                 crawl_state["error"] = "rebuild failed: " + ", ".join(failed_kinds)
-            else:
-                crawl_state["stage"] = "done"
         print(
             "[rebuild] finished with crawler errors"
             if failed_kinds
@@ -408,21 +472,34 @@ def _rebuild_worker() -> None:
     try:
         _rebuild_content()
     finally:
-        _crawl_operation_lock.release()
+        _finish_crawl_operation()
 
 
 def start_rebuild() -> str:
-    if not _crawl_operation_lock.acquire(blocking=False):
+    global _rebuild_followup_requested
+    if not _acquire_crawl_operation(defer_rebuild=True):
         return "already_running"
     try:
-        _begin_content_progress()
-        worker = threading.Thread(target=_rebuild_worker, daemon=True)
-        worker.start()
+        _launch_rebuild_worker()
     except Exception as error:
-        with _crawl_state_lock:
-            crawl_state["stage"] = "error"
-            crawl_state["error"] = str(error)
-        _crawl_operation_lock.release()
+        with _crawl_operation_state_lock:
+            if _rebuild_followup_requested:
+                _rebuild_followup_requested = False
+                run_deferred = True
+            else:
+                with _crawl_state_lock:
+                    crawl_state["stage"] = "error"
+                    crawl_state["error"] = str(error)
+                _crawl_operation_lock.release()
+                run_deferred = False
+        if run_deferred:
+            print(
+                f"[rebuild] worker start failed; running accepted crawl synchronously: {error}",
+                flush=True,
+            )
+            _rebuild_content()
+            _finish_crawl_operation()
+            return "started"
         raise
     return "started"
 
@@ -556,6 +633,27 @@ def _build_statement_payload_from_parts(contest_id: str, index: str) -> dict:
     )
 
 
+def _open_directory_without_symlinks(path: Path) -> int:
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    directory = getattr(os, "O_DIRECTORY", None)
+    if not isinstance(no_follow, int) or not isinstance(directory, int):
+        raise OSError("secure directory traversal is unavailable")
+    flags = os.O_RDONLY | no_follow | directory | getattr(os, "O_CLOEXEC", 0)
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if not absolute.parts:
+        raise OSError("invalid directory path")
+    descriptor = os.open(absolute.parts[0], flags)
+    try:
+        for component in absolute.parts[1:]:
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
 def _read_content_asset(
     content_kind: str,
     raw_name: str,
@@ -566,10 +664,39 @@ def _read_content_asset(
     identity = parse_asset_name(raw_name, content_kind=content_kind)
     if identity is None or Path(raw_name).name != raw_name:
         raise ValueError("invalid asset name")
-    asset_path = root / "assets" / identity.name
-    if asset_path.is_symlink() or not asset_path.is_file():
-        raise FileNotFoundError(raw_name)
-    payload = asset_path.read_bytes()
+    root_descriptor: int | None = None
+    assets_descriptor: int | None = None
+    asset_descriptor: int | None = None
+    try:
+        root_descriptor = _open_directory_without_symlinks(root)
+        directory_flags = (
+            os.O_RDONLY
+            | os.O_NOFOLLOW
+            | os.O_DIRECTORY
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        assets_descriptor = os.open(
+            "assets",
+            directory_flags,
+            dir_fd=root_descriptor,
+        )
+        asset_descriptor = os.open(
+            identity.name,
+            os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=assets_descriptor,
+        )
+        if not stat.S_ISREG(os.fstat(asset_descriptor).st_mode):
+            raise OSError("asset is not a regular file")
+        stream = os.fdopen(asset_descriptor, "rb")
+        asset_descriptor = None
+        with stream:
+            payload = stream.read()
+    except OSError as error:
+        raise FileNotFoundError(raw_name) from error
+    finally:
+        for descriptor in (asset_descriptor, assets_descriptor, root_descriptor):
+            if descriptor is not None:
+                os.close(descriptor)
     if hashlib.sha256(payload).hexdigest() != identity.digest:
         raise FileNotFoundError(raw_name)
     if not asset_magic_is_valid(identity.extension, payload):

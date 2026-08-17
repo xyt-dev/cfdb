@@ -10,11 +10,12 @@ ASSET_CONTENT_TYPES = {
     "jpeg": "image/jpeg",
     "gif": "image/gif",
     "webp": "image/webp",
+    "bmp": "image/bmp",
     "pdf": "application/pdf",
 }
-_IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "webp"})
+_IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "webp", "bmp"})
 _ASSET_NAME_RE = re.compile(
-    r"(?P<digest>[0-9a-f]{64})\.(?P<extension>png|jpg|jpeg|gif|webp|pdf)"
+    r"(?P<digest>[0-9a-f]{64})\.(?P<extension>png|jpg|jpeg|gif|webp|bmp|pdf)"
 )
 _ROUTE_PREFIXES = {
     "editorial": "/editorial-assets",
@@ -76,6 +77,53 @@ def asset_identity_from_route(
     return identity
 
 
+def _valid_bmp_payload(payload: bytes) -> bool:
+    if len(payload) < 26 or not payload.startswith(b"BM"):
+        return False
+    declared_size = int.from_bytes(payload[2:6], "little")
+    if declared_size not in {len(payload), len(payload) + 1}:
+        return False
+    pixel_offset = int.from_bytes(payload[10:14], "little")
+    dib_size = int.from_bytes(payload[14:18], "little")
+    compression = 0
+    colors_used = 0
+    palette_entry_bytes = 4
+    if dib_size == 12:
+        width = int.from_bytes(payload[18:20], "little")
+        height = int.from_bytes(payload[20:22], "little")
+        planes = int.from_bytes(payload[22:24], "little")
+        bits_per_pixel = int.from_bytes(payload[24:26], "little")
+        palette_entry_bytes = 3
+    else:
+        if dib_size < 40 or len(payload) < 14 + dib_size:
+            return False
+        width = int.from_bytes(payload[18:22], "little", signed=True)
+        height = int.from_bytes(payload[22:26], "little", signed=True)
+        planes = int.from_bytes(payload[26:28], "little")
+        bits_per_pixel = int.from_bytes(payload[28:30], "little")
+        compression = int.from_bytes(payload[30:34], "little")
+        colors_used = int.from_bytes(payload[46:50], "little")
+    if (
+        width <= 0
+        or height == 0
+        or planes != 1
+        or bits_per_pixel not in {1, 4, 8, 16, 24, 32}
+        or compression != 0
+    ):
+        return False
+    palette_entries = colors_used
+    if bits_per_pixel <= 8:
+        maximum_colors = 1 << bits_per_pixel
+        if colors_used > maximum_colors:
+            return False
+        palette_entries = colors_used or maximum_colors
+    minimum_pixel_offset = 14 + dib_size + palette_entries * palette_entry_bytes
+    if pixel_offset < minimum_pixel_offset:
+        return False
+    row_bytes = ((width * bits_per_pixel + 31) // 32) * 4
+    return pixel_offset + row_bytes * abs(height) <= len(payload)
+
+
 def asset_magic_is_valid(extension: str, payload: bytes) -> bool:
     if extension == "png":
         return payload.startswith(b"\x89PNG\r\n\x1a\n")
@@ -85,6 +133,8 @@ def asset_magic_is_valid(extension: str, payload: bytes) -> bool:
         return payload.startswith((b"GIF87a", b"GIF89a"))
     if extension == "webp":
         return len(payload) >= 12 and payload.startswith(b"RIFF") and payload[8:12] == b"WEBP"
+    if extension == "bmp":
+        return _valid_bmp_payload(payload)
     if extension == "pdf":
         return payload.startswith(b"%PDF-")
     return False

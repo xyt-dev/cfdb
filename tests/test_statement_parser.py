@@ -139,6 +139,63 @@ class StatementParserTests(unittest.TestCase):
             ["Outputone", "Outputtwo", "Outputthree"],
         )
 
+
+    def test_empty_grouped_sample_wrapper_represents_no_samples(self):
+        document = parse_statement_html(
+            """
+            <div class="problem-statement">
+              <div class="header"><div class="title">D. No Samples</div></div>
+              <div class="sample-tests">
+                <div class="section-title">Examples</div>
+                <div class="sample-test"></div>
+              </div>
+              <div class="note"><p>This problem has no samples.</p></div>
+            </div>
+            """,
+            problem_code="171D",
+            contest_id="171",
+            index="D",
+            source_url="https://codeforces.com/contest/171/problem/D",
+        )
+
+        self.assertEqual(len(_nodes_with_role(document.root, "samples")), 1)
+        self.assertEqual(_nodes_with_role(document.root, "sample"), [])
+        self.assertIn("This problem has no samples.", _plain_text(document.root))
+
+    def test_grouped_sample_wrapper_ignores_legacy_br_separators(self):
+        document = parse_statement_html(
+            """
+            <div class="problem-statement">
+              <div class="header"><div class="title">I. Legacy Samples</div></div>
+              <div class="sample-tests">
+                <div class="section-title">Examples</div>
+                <div class="sample-test">
+                  <div class="input"><div class="title">Input</div><pre>1</pre></div>
+                  <div class="output"><div class="title">Output</div><pre>one</pre></div>
+                  <br><br>
+                  <div class="input"><div class="title">Input</div><pre>2</pre></div>
+                  <div class="output"><div class="title">Output</div><pre>two</pre></div>
+                  <br>
+                </div>
+              </div>
+            </div>
+            """,
+            problem_code="45I",
+            contest_id="45",
+            index="I",
+            source_url="https://codeforces.com/contest/45/problem/I",
+        )
+
+        self.assertEqual(len(_nodes_with_role(document.root, "sample")), 2)
+        self.assertEqual(
+            [_plain_text(node) for node in _nodes_with_role(document.root, "sample_input")],
+            ["Input1", "Input2"],
+        )
+        self.assertEqual(
+            [_plain_text(node) for node in _nodes_with_role(document.root, "sample_output")],
+            ["Outputone", "Outputtwo"],
+        )
+
     def test_grouped_sample_wrapper_rejects_malformed_sequences(self):
         input_node = '<div class="input"><div class="title">Input</div><pre>1</pre></div>'
         output_node = '<div class="output"><div class="title">Output</div><pre>one</pre></div>'
@@ -146,7 +203,6 @@ class StatementParserTests(unittest.TestCase):
             "output-first": output_node + input_node,
             "duplicate-input": input_node + input_node + output_node,
             "trailing-input": input_node,
-            "empty": "",
             "intervening-node": input_node + "<p>unexpected</p>" + output_node,
         }
 
@@ -167,6 +223,26 @@ class StatementParserTests(unittest.TestCase):
                         index="A",
                         source_url="https://codeforces.com/contest/1000/problem/A",
                     )
+
+
+    def test_unwrapped_sample_pair_rejects_intervening_nodes(self):
+        with self.assertRaisesRegex(ParseError, "^invalid-sample-pair$"):
+            parse_statement_html(
+                """
+                <div class="problem-statement">
+                  <div class="header"><div class="title">A. Malformed Legacy Samples</div></div>
+                  <div class="sample-tests">
+                    <div class="input"><div class="title">Input</div><pre>1</pre></div>
+                    <p>unexpected</p>
+                    <div class="output"><div class="title">Output</div><pre>one</pre></div>
+                  </div>
+                </div>
+                """,
+                problem_code="1000A",
+                contest_id="1000",
+                index="A",
+                source_url="https://codeforces.com/contest/1000/problem/A",
+            )
 
     def test_localized_labels_do_not_determine_section_identity(self):
         document = self.parse_fixture(

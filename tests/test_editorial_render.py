@@ -210,7 +210,7 @@ class EditorialRenderTests(unittest.TestCase):
             prefix: None,
             f"{prefix}.html": None,
             f"{prefix}.svg": None,
-            f"{prefix}.bmp": None,
+            f"{prefix}.bmp": f"{prefix}.bmp",
         }
         for value, expected in cases.items():
             with self.subTest(value=value):

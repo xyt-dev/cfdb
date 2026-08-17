@@ -201,6 +201,54 @@ class StatementServerTests(unittest.TestCase):
             self.assertEqual(missing_status, 404)
             self.assertEqual(extension_status, 400)
 
+
+    def test_asset_route_rejects_symlinked_cache_paths(self):
+        payload = b"%PDF-1.7\nsymlink-fixture"
+        digest = hashlib.sha256(payload).hexdigest()
+        name = f"{digest}.pdf"
+        route = f"/statement-assets/{name}"
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            outside_root = base / "outside-root"
+            outside_assets = outside_root / "assets"
+            outside_assets.mkdir(parents=True)
+            (outside_assets / name).write_bytes(payload)
+
+            root_link = base / "root-link"
+            root_link.symlink_to(outside_root, target_is_directory=True)
+            root_status, _, _ = self.request(route, statement_root=root_link)
+
+            normal_root = base / "normal-root"
+            normal_root.mkdir()
+            assets_link = normal_root / "assets"
+            assets_link.symlink_to(outside_assets, target_is_directory=True)
+            assets_status, _, _ = self.request(route, statement_root=normal_root)
+
+            ancestor_target = base / "ancestor-target"
+            nested_root = ancestor_target / "nested-root"
+            nested_assets = nested_root / "assets"
+            nested_assets.mkdir(parents=True)
+            (nested_assets / name).write_bytes(payload)
+            ancestor_link = base / "ancestor-link"
+            ancestor_link.symlink_to(ancestor_target, target_is_directory=True)
+            ancestor_status, _, _ = self.request(
+                route,
+                statement_root=ancestor_link / "nested-root",
+            )
+
+            file_root = base / "file-root"
+            file_assets = file_root / "assets"
+            file_assets.mkdir(parents=True)
+            outside_file = base / "outside.pdf"
+            outside_file.write_bytes(payload)
+            (file_assets / name).symlink_to(outside_file)
+            file_status, _, _ = self.request(route, statement_root=file_root)
+
+        self.assertEqual(root_status, 404)
+        self.assertEqual(assets_status, 404)
+        self.assertEqual(ancestor_status, 404)
+        self.assertEqual(file_status, 404)
+
     def test_invalid_statement_reference_returns_400(self):
         with tempfile.TemporaryDirectory() as directory:
             status, _, body = self.request(

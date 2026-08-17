@@ -115,6 +115,65 @@ class FixtureEditorialSource:
 
 
 class EditorialRebuildTests(unittest.TestCase):
+    def test_pending_preview_can_skip_ready_document_validation(self):
+        source = FixtureEditorialSource(("1700", "9999"))
+        with tempfile.TemporaryDirectory() as directory:
+            store = ContentStore.initialize(directory, EDITORIAL_CODEC)
+            store.document_path("1700").write_text("{}", encoding="utf-8")
+            with patch.object(
+                ContentStore,
+                "ready_ids",
+                side_effect=AssertionError("preview validated ready documents"),
+            ):
+                pending = editorial_rebuild.pending_editorial_ids(
+                    source=source,
+                    cache_root=directory,
+                    validate_documents=False,
+                )
+            validated_pending = editorial_rebuild.pending_editorial_ids(
+                source=source,
+                cache_root=directory,
+            )
+
+        self.assertEqual(pending, ["9999"])
+        self.assertEqual(validated_pending, ["1700", "9999"])
+    def test_recognition_ignores_error_phrase_inside_editorial_content(self):
+        body = """
+            <html>
+              <head><title>Round editorial - Codeforces</title></head>
+              <body><div class="ttypography">The target does not exist.</div></body>
+            </html>
+        """
+
+        self.assertTrue(editorial_rebuild._is_recognized(body))
+
+    def test_recognition_rejects_explicit_missing_page_title(self):
+        body = """
+            <html>
+              <head><title>Blog entry does not exist - Codeforces</title></head>
+              <body><div class="error">Missing entry</div></body>
+            </html>
+        """
+
+        self.assertFalse(editorial_rebuild._is_recognized(body))
+
+
+    def test_recognition_ignores_body_prose_when_head_end_is_omitted(self):
+        body = """
+            <html>
+              <head>
+                <title>Round editorial - Codeforces</title>
+                <meta name="description" content="The target does not exist">
+              <body>
+                <div class="ttypography">The target does not exist.</div>
+              </body>
+            </html>
+        """
+
+        self.assertTrue(editorial_rebuild._is_recognized(body))
+
+    def test_recognition_rejects_plain_block_page(self):
+        self.assertFalse(editorial_rebuild._is_recognized("403 Forbidden\nnginx/1.18"))
     def test_completed_contest_is_readable_while_another_fetch_is_blocked(self):
         source = FixtureEditorialSource(
             ("1700", "9999")
