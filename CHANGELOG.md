@@ -7,6 +7,8 @@
 ### 修复
 
 - **题解缺图不再阻止正文发布**：对已审计确认永久失效的 47 个历史图片 URL 使用 typed `missing_asset` 占位，未知资源失败仍保持可重试且不发布；题解资源管线补齐 BMP magic 分类。正常增量重爬后 34 场历史题解恢复，当前题解为 1820 ready、185 confirmed absent、0 transient。
+- **空待爬列表明确提示**：没有 pending 项时 `Pending Crawl List / 待爬列表` 仍可点击，改为显示只读的 `Everything is clean / 当前内容已全部就绪` 状态弹窗，不显示确认按钮且不会发送 Rebuild POST。
+- **元数据语言固定为英语**：Codeforces `problemset.problems` 请求显式添加 `lang=en`，避免默认 locale 随环境变化；Codeforces 英文 API 仍原样返回的 42 个俄文/特殊题名保持官方值，不做机器翻译或转写。
 
 ## [v4.1] - 2026-08-17
 

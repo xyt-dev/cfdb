@@ -15,7 +15,7 @@ from statement_rebuild import rebuild_statements, update_statements, validate_st
 
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-API_URL = "https://codeforces.com/api/problemset.problems"
+API_URL = "https://codeforces.com/api/problemset.problems?lang=en"
 UA = "Mozilla/5.0 (X11; Linux x86_64) cfdb-update/0.1"
 
 

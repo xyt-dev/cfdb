@@ -520,6 +520,75 @@ test("rebuild preview separates clickable tabs and clears after enqueue", () => 
 	assert.equal(elements["rebuild-dialog-confirm"].disabled, true);
 });
 
+test("empty pending crawl list reports clean without rebuilding", async () => {
+	const source = fs.readFileSync(
+		path.join(__dirname, "..", "index.html"),
+		"utf8",
+	);
+	assert.match(
+		source,
+		/pendingCrawlClean:\s*"Everything is clean\. No content is waiting to be crawled\."/,
+	);
+	assert.match(
+		source,
+		/pendingCrawlClean:\s*"当前内容已全部就绪，没有待爬项目。"/,
+	);
+	const start = source.indexOf("async function fetchRebuildPreview");
+	const end = source.indexOf("/* 恢复默认筛选 */", start);
+	const script = source.slice(start, end);
+	const requests = [];
+	const dialogs = [];
+	const button = { disabled: false };
+	const context = vm.createContext({
+		JSON,
+		rebuildInFlight: false,
+		rebuildRequestVersion: 0,
+		rebuildRequestPending: false,
+		console,
+		fetch: async (url, options) => {
+			requests.push({ url, options });
+			if (url !== "/api/rebuild/preview") {
+				throw new Error("empty preview must not POST");
+			}
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({
+					status: "ready",
+					statements: { count: 0, items: [] },
+					editorials: { count: 0, items: [] },
+				}),
+			};
+		},
+		showRebuildDialog: async (options) => {
+			dialogs.push({
+				title: options.title,
+				message: options.message,
+				mode: options.mode,
+			});
+			return false;
+		},
+		t: (key) => key,
+	});
+	vm.runInContext(script, context, { filename: "rebuild-control.js" });
+
+	await context.requestRebuild(button);
+
+	assert.deepEqual(requests, [
+		{ url: "/api/rebuild/preview", options: undefined },
+	]);
+	assert.deepEqual(dialogs, [
+		{
+			title: "pendingCrawlList",
+			message: "pendingCrawlClean",
+			mode: "status",
+		},
+	]);
+	assert.equal(button.disabled, false);
+	assert.equal(context.rebuildRequestPending, false);
+	assert.equal(context.rebuildInFlight, false);
+});
+
 test("rebuild control accepts started and coalesced incremental crawls", async () => {
 	const source = fs.readFileSync(
 		path.join(__dirname, "..", "index.html"),
@@ -609,7 +678,7 @@ test("rebuild control cancels cleanly and themes request failures", async () => 
 				ok: true,
 				json: async () => ({
 					status: "ready",
-					statements: { items: [] },
+					statements: { items: [{ id: "1605E", label: "1605E" }] },
 					editorials: { items: [] },
 				}),
 			};
@@ -659,7 +728,7 @@ test("rebuild control cancels cleanly and themes request failures", async () => 
 						ok: true,
 						json: async () => ({
 							status: "ready",
-							statements: { items: [] },
+							statements: { items: [{ id: "1605E", label: "1605E" }] },
 							editorials: { items: [] },
 						}),
 					};
@@ -731,7 +800,7 @@ test("stale terminal progress cannot re-enable an accepted rebuild", async () =>
 					ok: true,
 					json: async () => ({
 						status: "ready",
-						statements: { items: [] },
+						statements: { items: [{ id: "1605E", label: "1605E" }] },
 						editorials: { items: [] },
 					}),
 				};

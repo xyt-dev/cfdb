@@ -1079,6 +1079,8 @@
           rebuildTitle: "Retry all skipped content",
           pendingCrawlList: "Pending Crawl List",
           pendingCrawlListTitle: "Show pending crawl list",
+          pendingCrawlClean:
+            "Everything is clean. No content is waiting to be crawled.",
           rebuildDialogTitle: "Retry skipped content",
           rebuildConfirm:
             "Force-retry every currently skipped statement and editorial shown below. Ready content is not changed.",
@@ -1170,6 +1172,7 @@
           rebuildTitle: "重爬所有跳过内容",
           pendingCrawlList: "待爬列表",
           pendingCrawlListTitle: "查看待爬内容列表",
+          pendingCrawlClean: "当前内容已全部就绪，没有待爬项目。",
           rebuildDialogTitle: "重爬跳过内容",
           rebuildConfirm:
             "强制重爬下面列出的所有当前跳过的题面和题解；已就绪内容不会改变。",
@@ -1657,6 +1660,30 @@
         }
 
         try {
+          const statementItems =
+            preview &&
+            preview.statements &&
+            Array.isArray(preview.statements.items)
+              ? preview.statements.items
+              : [];
+          const editorialItems =
+            preview &&
+            preview.editorials &&
+            Array.isArray(preview.editorials.items)
+              ? preview.editorials.items
+              : [];
+          if (statementItems.length + editorialItems.length === 0) {
+            rebuildRequestPending = false;
+            rebuildInFlight = false;
+            button.disabled = false;
+            await showRebuildDialog({
+              title: t("pendingCrawlList"),
+              message: t("pendingCrawlClean"),
+              mode: "status",
+              trigger: button,
+            });
+            return;
+          }
           const confirmed = await showRebuildDialog({
             title: t("rebuildDialogTitle"),
             message: t("rebuildConfirm"),

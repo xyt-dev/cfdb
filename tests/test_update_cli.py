@@ -26,6 +26,11 @@ SUCCESS = {
 
 
 class UpdateCliTests(unittest.TestCase):
+    def test_metadata_api_explicitly_requests_english(self):
+        self.assertEqual(
+            update.API_URL,
+            "https://codeforces.com/api/problemset.problems?lang=en",
+        )
     def test_plain_statement_update_bootstraps_without_pointer_check(self):
         with patch("update.update_statements", return_value=SUCCESS) as crawl, patch(
             "update.rebuild_statements"
