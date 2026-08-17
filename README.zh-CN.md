@@ -27,6 +27,18 @@ python3 server.py
 
 打开 <http://localhost:8765>。服务器会打印局域网地址，并在后台同时启动两个缺失内容爬虫；每个完成项都会立即可用。
 
+### 完整数据快照
+
+使用日期快照可直接获得已验证的题面、题解、资源、元数据与解题代码：
+
+```bash
+git clone --branch snapshot-2026-08-18 --depth 1 https://github.com/xyt-dev/cfdb.git cfdb-snapshot
+cd cfdb-snapshot
+python3 server.py
+```
+
+普通 `main` 克隆仍以代码为主，缺失的本地数据由后台爬虫补齐。
+
 运行依赖为 Python 3.10+ 与 `curl`。无需 pip、npm、Node.js 运行时、`pdftotext` 或 CDN；浏览器资源均位于 `vendor/`。
 
 端口覆盖：`CFDB_PORT=9000 python3 server.py`。

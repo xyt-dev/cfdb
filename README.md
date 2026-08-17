@@ -31,6 +31,18 @@ python3 server.py
 
 Open <http://localhost:8765>. The server prints its LAN address and starts both missing-content crawlers in the background. Each completed item becomes available immediately.
 
+### Full Data Snapshot
+
+Clone the dated snapshot to start with validated statements, editorials, assets, metadata, and solutions already bundled:
+
+```bash
+git clone --branch snapshot-2026-08-18 --depth 1 https://github.com/xyt-dev/cfdb.git cfdb-snapshot
+cd cfdb-snapshot
+python3 server.py
+```
+
+The regular `main` clone remains code-first and fills missing local data through the background crawlers.
+
 Runtime dependencies are Python 3.10+ and `curl`. No pip, npm, Node.js runtime, `pdftotext`, or CDN is required. Browser assets are vendored under `vendor/`.
 
 Override the port with `CFDB_PORT=9000 python3 server.py`.
