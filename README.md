@@ -36,7 +36,7 @@ Open <http://localhost:8765>. The server prints its LAN address and starts both 
 Clone the dated snapshot to start with validated statements, editorials, assets, metadata, and solutions already bundled:
 
 ```bash
-git clone --branch snapshot-2026-08-18 --depth 1 https://github.com/xyt-dev/cfdb.git cfdb-snapshot
+git clone --branch snapshot-2026-10 --depth 1 https://github.com/xyt-dev/cfdb.git cfdb-snapshot
 cd cfdb-snapshot
 python3 server.py
 ```
