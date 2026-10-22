@@ -1,16 +1,19 @@
-# 爬取数据（update.py 可再生成，不入库）
-statements/
+# 爬取数据
+# snapshot 分支：v2 canonical 数据入库；v1 Markdown/图片仅保留在本地
+statements/*.md
+statements/images/
 statements_bak/
-editorials/
+editorials/*.md
+editorials/images/
 editorials_bak/
 editorials_bak2/
-problems.json
 failed_statements.json
 
 # 依赖与运行时产物
 node_modules/
 __pycache__/
 *.pyc
+crawl.lock
 
 # 本地临时
 *.log
