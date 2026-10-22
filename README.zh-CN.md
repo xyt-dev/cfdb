@@ -32,7 +32,7 @@ python3 server.py
 使用日期快照可直接获得已验证的题面、题解、资源、元数据与解题代码：
 
 ```bash
-git clone --branch snapshot-2026-08-18 --depth 1 https://github.com/xyt-dev/cfdb.git cfdb-snapshot
+git clone --branch snapshot-2026-10 --depth 1 https://github.com/xyt-dev/cfdb.git cfdb-snapshot
 cd cfdb-snapshot
 python3 server.py
 ```
